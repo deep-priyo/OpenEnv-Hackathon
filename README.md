@@ -1,3 +1,15 @@
+---
+title: OpenEnv Code Review Environment
+emoji: 🤖
+colorFrom: blue
+colorTo: purple
+sdk: docker
+app_port: 7860
+pinned: false
+---
+
+
+
 # CIVERSE(OPNE-ENV): Code Review RL Environment (OpenEnv-Compatible)
 
 An **OpenEnv-compatible reinforcement learning environment** for evaluating AI agents on real-world code review tasks.
