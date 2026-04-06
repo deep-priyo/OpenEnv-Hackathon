@@ -1,0 +1,130 @@
+# openenv.yaml
+# OpenEnv Compliance Manifest
+# Required for hackathon submission
+
+name: code-review-environment
+version: "1.0.0"
+description: >
+  A reinforcement learning environment where AI agents learn to review code.
+  Agents progress through 3 tasks of increasing difficulty: bug detection (easy),
+  bug classification (medium), and fix suggestion (hard).
+  Powered by OpenAI-generated code snippets for infinite task variety.
+
+author: "hackathon-team"
+license: MIT
+
+# ─── Environment Metadata ────────────────────────────────────────────────────
+
+environment:
+  type: sequential          # Tasks must be completed in order
+  observation_space: text   # Code + task description
+  action_space: structured  # Pydantic Action objects
+  reward_range: [0.0, 1.0]
+  deterministic: false      # Dynamic snippet generation adds variance
+  max_episode_steps: 10     # Total steps across all 3 tasks (2 + 5 + 3)
+
+# ─── Tasks ───────────────────────────────────────────────────────────────────
+
+tasks:
+  - id: 1
+    name: bug_detection
+    difficulty: easy
+    max_steps: 2
+    description: >
+      Binary classification: does this code contain a bug?
+      Agent uses detect_bug action to identify a bug with location and type,
+      or skip if code is clean.
+    grader: BugDetectionGrader
+    scoring: binary  # 1.0 correct, 0.0 wrong
+
+  - id: 2
+    name: bug_classification
+    difficulty: medium
+    max_steps: 5
+    description: >
+      Find ALL bugs in the code and classify their type and severity correctly.
+      Partial credit awarded based on precision/recall (F1 score).
+    grader: BugClassificationGrader
+    scoring: partial_credit  # F1-based with severity accuracy component
+
+  - id: 3
+    name: fix_suggestion
+    difficulty: hard
+    max_steps: 3
+    description: >
+      Suggest a detailed, correct fix for the identified bug.
+      Includes explanation of why the fix works.
+    grader: FixSuggestionGrader
+    scoring: rubric  # Keyword match + explanation quality + code syntax
+
+# ─── Action Space ─────────────────────────────────────────────────────────────
+
+actions:
+  - name: detect_bug
+    required_fields: [bug.line_number, bug.bug_type, bug.severity, bug.description]
+    optional_fields: [bug.suggested_fix, explanation, confidence]
+
+  - name: suggest_fix
+    required_fields: [bug, fix_suggestion]
+    optional_fields: [explanation, confidence]
+
+  - name: skip
+    description: "Use when code has no bugs (Task 1) or all bugs found (Task 2)"
+
+# ─── Observation Space ───────────────────────────────────────────────────────
+
+observation:
+  fields:
+    - code_context.code.code: "The Python code to review"
+    - code_context.code.filename: "Filename for context"
+    - task_description: "Natural language task instructions"
+    - current_task: "Task ID (1, 2, or 3)"
+    - step_count: "Steps taken in current task"
+    - max_steps: "Max allowed steps"
+    - bugs_found_so_far: "Number of bugs reported so far"
+    - total_bugs: "Ground truth total bugs (revealed at end)"
+
+# ─── Reward Shaping ──────────────────────────────────────────────────────────
+
+reward:
+  base_score: "Grader output [0.0, 1.0]"
+  step_penalty: "-0.02 per step beyond first (encourages efficiency)"
+  confidence_bonus: "+0.05 if confident AND correct, -0.05 if confident AND wrong"
+  final_range: [0.0, 1.0]  # Clipped
+
+# ─── Code Generation ─────────────────────────────────────────────────────────
+
+data:
+  source: dynamic            # LLM-generated per episode
+  generator: gpt-4o-mini        # OpenAI gpt-4o-mini
+  fallback: hardcoded        # 9 static examples if API unavailable
+  snippet_count_per_episode: 3  # Per task
+  languages: [python]
+
+# ─── API ─────────────────────────────────────────────────────────────────────
+
+api:
+  framework: flask
+  prefix: /api
+  endpoints:
+    - POST /api/reset   "Reset environment, returns initial observation"
+    - POST /api/step    "Execute action, returns observation + reward"
+    - GET  /api/state   "Current environment state"
+    - GET  /api/health  "Health check"
+
+# ─── Baseline ────────────────────────────────────────────────────────────────
+
+baseline:
+  script: baseline_inference.py
+  agent: CodeReviewAgent
+  expected_score_range: [0.6, 0.9]  # OpenAI baseline performance
+
+# ─── Dependencies ─────────────────────────────────────────────────────────────
+
+dependencies:
+  python: ">=3.9"
+  packages:
+    - openai>=1.10.0
+    - flask>=3.0.0
+    - flask-cors>=4.0.0
+    - pydantic>=2.0.0
