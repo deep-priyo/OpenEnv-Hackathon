@@ -15,8 +15,8 @@ api = Blueprint('api', __name__)
 
 # Single environment instance (stateful per server session)
 # In production, use session-scoped envs or a proper env manager
-env = CodeReviewEnvironment(use_dynamic_snippets=True)
-
+use_dynamic = os.getenv("EVAL_MODE") != "true"
+env = CodeReviewEnvironment(use_dynamic_snippets=use_dynamic)
 
 @api.route('/reset', methods=['GET', 'POST'])
 def reset():
