@@ -13,6 +13,8 @@ from backend.agent import CodeReviewAgent
 TASK_NAME = os.getenv("MY_ENV_V4_TASK", "code_review")
 BENCHMARK = os.getenv("MY_ENV_V4_BENCHMARK", "my_env_v4")
 MODEL_NAME = os.getenv("MODEL_NAME", "gpt-4o-mini")
+API_BASE_URL = os.getenv("API_BASE_URL", "https://router.huggingface.co/v1")
+HF_TOKEN = os.getenv("HF_TOKEN")
 
 MAX_STEPS = 8
 SUCCESS_THRESHOLD = 0.3  # adjust if needed
