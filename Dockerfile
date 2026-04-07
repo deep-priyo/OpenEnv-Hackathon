@@ -23,6 +23,6 @@ ENV HF_TOKEN=""
 EXPOSE 7860
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:7860/api/health || exit 1
+    CMD curl -f http://localhost:7860/health || exit 1
 
 CMD ["python", "backend/app.py"]
