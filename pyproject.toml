@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "code-review-environment"
+version = "1.0.0"
+description = "OpenEnv RL environment for code review agents"
+authors = [
+    {name = "Priyadeep Mullick"},
+    {name = "Subhro Koley"},
+
+
+]
+dependencies = [
+    "flask",
+    "flask-cors",
+    "pydantic",
+    "openai"
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
