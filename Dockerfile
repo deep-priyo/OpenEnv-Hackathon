@@ -23,6 +23,7 @@ COPY . .
 # HuggingFace Spaces runs on port 7860
 ENV PORT=7860
 ENV PYTHONUNBUFFERED=1
+ENV EVAL_MODE=true
 
 # Expose port
 EXPOSE 7860
