@@ -6,18 +6,21 @@ build-backend = "setuptools.build_meta"
 name = "code-review-environment"
 version = "1.0.0"
 description = "OpenEnv RL environment for code review agents"
-authors = [
-    {name = "Priyadeep Mullick"},
-    {name = "Subhro Koley"},
+authors = [{name = "Priyadeep Mullick, Subhro Koley"}]
 
+requires-python = ">=3.10"
 
-]
 dependencies = [
     "flask",
     "flask-cors",
     "pydantic",
-    "openai"
+    "openai",
+    "openenv-core>=0.2.0"
 ]
+
+# 🔥 THIS IS CRITICAL (server entrypoint)
+[project.scripts]
+server = "server.app:app"
 
 [tool.setuptools.packages.find]
 where = ["."]
