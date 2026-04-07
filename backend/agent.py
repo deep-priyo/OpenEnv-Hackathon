@@ -101,7 +101,18 @@ def _number_lines(code: str) -> str:
 class CodeReviewAgent:
 
     def __init__(self, api_key=None, model="gpt-4o-mini"):
-        self.client = OpenAI(api_key=api_key or os.getenv("OPENAI_API_KEY"))
+        api_key = (
+                api_key
+                or os.getenv("HF_TOKEN")
+                or os.getenv("OPENAI_API_KEY")
+        )
+
+        base_url = os.getenv("API_BASE_URL")
+
+        self.client = OpenAI(
+            api_key=api_key,
+            base_url=base_url if base_url else None
+        )
         self.model = model
         self.learning_memory: List[Dict] = []
         self.total_calls = 0
