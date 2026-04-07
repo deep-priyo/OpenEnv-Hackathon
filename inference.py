@@ -1,110 +1,97 @@
-"""
-Baseline Inference Script
-Runs the environment with a simple rule-based agent
-"""
-
-import sys
 import os
+import sys
+import asyncio
+from typing import List
+
+# Ensure backend import works
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'backend'))
 
-from environment import CodeReviewEnvironment, Action, ActionType, Bug, BugType, Severity
+from backend.environment import CodeReviewEnvironment
+from backend.agent import CodeReviewAgent
 
-def simple_agent(observation):
-    """Simple rule-based agent for testing"""
-    
-    code = observation.code_context.code.code.lower()
-    bugs_found = observation.bugs_found_so_far
-    total_bugs = observation.total_bugs
-    
-    # Task 1: Bug Detection
-    if observation.current_task == 1:
-        # Check for common vulnerability patterns
-        if 'sql' in code and '+' in code:
-            return Action(
-                action_type=ActionType.DETECT_BUG,
-                bug=Bug(
-                    line_number=2,
-                    bug_type=BugType.SECURITY,
-                    severity=Severity.CRITICAL,
-                    description="SQL injection vulnerability"
-                ),
-                confidence=0.8
-            )
-        elif 'innerhtml' in code or 'document.write' in code:
-            return Action(
-                action_type=ActionType.DETECT_BUG,
-                bug=Bug(
-                    line_number=1,
-                    bug_type=BugType.SECURITY,
-                    severity=Severity.HIGH,
-                    description="XSS vulnerability"
-                ),
-                confidence=0.8
-            )
-        else:
-            return Action(action_type=ActionType.SKIP, confidence=0.5)
-    
-    # Task 2: Bug Classification
-    elif observation.current_task == 2:
-        if bugs_found < total_bugs:
-            # Try to find more bugs
-            return Action(
-                action_type=ActionType.DETECT_BUG,
-                bug=Bug(
-                    line_number=3,
-                    bug_type=BugType.PERFORMANCE,
-                    severity=Severity.MEDIUM,
-                    description="Performance issue"
-                ),
-                confidence=0.7
-            )
-        else:
-            return Action(action_type=ActionType.SKIP, confidence=0.9)
-    
-    # Task 3: Fix Suggestion
-    else:
-        return Action(
-            action_type=ActionType.SUGGEST_FIX,
-            fix_suggestion="Use a proper data structure to track order, like OrderedDict or deque.",
-            explanation="The current implementation removes an arbitrary item because dict doesn't maintain order.",
-            confidence=0.8
-        )
+# ===== CONFIG =====
+TASK_NAME = os.getenv("MY_ENV_V4_TASK", "code_review")
+BENCHMARK = os.getenv("MY_ENV_V4_BENCHMARK", "my_env_v4")
+MODEL_NAME = os.getenv("MODEL_NAME", "gpt-4o-mini")
 
+MAX_STEPS = 8
+SUCCESS_THRESHOLD = 0.3  # adjust if needed
+
+
+# ===== LOGGING FUNCTIONS =====
+def log_start():
+    print(f"[START] task={TASK_NAME} env={BENCHMARK} model={MODEL_NAME}", flush=True)
+
+
+def log_step(step: int, action: str, reward: float, done: bool):
+    print(
+        f"[STEP] step={step} action={action} reward={reward:.2f} done={str(done).lower()} error=null",
+        flush=True,
+    )
+
+
+def log_end(success: bool, steps: int, score: float, rewards: List[float]):
+    rewards_str = ",".join(f"{r:.2f}" for r in rewards)
+    print(
+        f"[END] success={str(success).lower()} steps={steps} score={score:.2f} rewards={rewards_str}",
+        flush=True,
+    )
+
+
+# ===== MAIN =====
 def main():
-    """Run baseline evaluation"""
-    env = CodeReviewEnvironment()
-    
-    print("="*60)
-    print("Code Review Assistant - Baseline Evaluation")
-    print("="*60)
-    
-    obs = env.reset()
-    total_reward = 0
-    step = 0
-    
-    while not env.done and step < 20:
-        step += 1
-        print(f"\n{'='*60}")
-        print(f"Step {step}: Task {obs.current_task} - {obs.task_description}")
-        print(f"{'='*60}")
-        print(f"Code:\n{obs.code_context.code.code}\n")
-        print(f"Bugs found: {obs.bugs_found_so_far}/{obs.total_bugs}")
-        
-        action = simple_agent(obs)
-        obs, reward, done, info = env.step(action)
-        
-        total_reward += reward.score
-        print(f"Action: {action.action_type.value}")
-        print(f"Reward: {reward.score:.3f}")
-        print(f"Feedback: {reward.feedback}")
-        print(f"Total Score: {env.total_score:.3f}")
-    
-    print("\n" + "="*60)
-    print("EVALUATION COMPLETE")
-    print("="*60)
-    print(f"Final Score: {env.total_score:.3f}")
-    print(f"Tasks Completed: {env.tasks_completed}")
-    print(f"Total Steps: {step}")
+    # Enforce deterministic mode
+    success = False
+    final_score = 0.0
+    os.environ["EVAL_MODE"] = "true"
+
+    env = CodeReviewEnvironment(use_dynamic_snippets=False)
+    agent = CodeReviewAgent()
+
+    rewards = []
+    steps_taken = 0
+
+    log_start()
+
+    try:
+        obs = env.reset()
+        done = False
+
+        for step in range(1, MAX_STEPS + 1):
+            if done:
+                break
+
+            action = agent.act(obs)
+
+            obs, reward, done, info = env.step(action)
+
+            r = reward.score if reward else 0.0
+            rewards.append(r)
+            steps_taken = step
+
+            action_str = str(action.action_type)
+
+            log_step(step, action_str, r, done)
+
+        # Normalize score
+        final_score = sum(rewards) / len(rewards) if rewards else 0.0
+        final_score = max(0.0, min(1.0, final_score))
+
+        success = final_score >= SUCCESS_THRESHOLD
+
+    except Exception as e:
+        # Even on crash, must output END
+        log_end(False, steps_taken, 0.0, rewards)
+        raise e
+
+    finally:
+        try:
+            env.close()
+        except:
+            pass
+
+        log_end(success, steps_taken, final_score, rewards)
+
 
 if __name__ == "__main__":
     main()
