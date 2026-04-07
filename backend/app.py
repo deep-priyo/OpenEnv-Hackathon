@@ -14,7 +14,7 @@ from api_routes import api
 
 app = Flask(__name__)
 CORS(app, origins=['http://localhost:3000', 'http://localhost:3001', 'http://localhost:5173'])
-app.register_blueprint(api, url_prefix='/api')
+app.register_blueprint(api)
 
 @app.route('/', methods=['GET'])
 def index():
@@ -23,10 +23,10 @@ def index():
         'version': '2.0.0',
         'description': 'OpenEnv RL environment for AI code review agents',
         'endpoints': {
-            'reset': 'POST /api/reset',
-            'step': 'POST /api/step',
-            'state': 'GET /api/state',
-            'health': 'GET /api/health'
+            'reset': 'POST /reset',
+            'step': 'POST /step',
+            'state': 'GET /state',
+            'health': 'GET /health'
         },
         'tasks': [
             {'id': 1, 'name': 'Bug Detection', 'difficulty': 'easy'},

@@ -18,7 +18,7 @@ api = Blueprint('api', __name__)
 use_dynamic = os.getenv("EVAL_MODE") != "true"
 env = CodeReviewEnvironment(use_dynamic_snippets=use_dynamic)
 
-@api.route('/reset', methods=['GET', 'POST'])
+@api.route('/reset', methods=['POST'])
 def reset():
     try:
         observation = env.reset()
