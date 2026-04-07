@@ -7,6 +7,8 @@ Key improvements over v1:
 - Hardcoded fallbacks if API is unavailable
 - Improved reward shaping (step penalty, partial credit)
 - Proper episode tracking
+- Fixed reward hacking with false positive penalties
+- Task 1 completion requires correctness, not just any action
 """
 
 from typing import Tuple, List, Dict, Optional
@@ -123,7 +125,8 @@ class CodeReviewEnvironment:
     """
 
     def __init__(self, use_dynamic_snippets: bool = True, openai_api_key: Optional[str] = None):
-        self.use_dynamic = use_dynamic_snippets and _GENERATOR_AVAILABLE
+        # Add this
+        self.use_dynamic = use_dynamic_snippets and _GENERATOR_AVAILABLE and os.getenv("EVAL_MODE") != "true"
         self._generator = None
 
         if self.use_dynamic:
@@ -187,11 +190,27 @@ class CodeReviewEnvironment:
             if not already_found:
                 self.bugs_found.append(action.bug)
 
+        # ── False Positive Detection (CRITICAL: prevents reward hacking) ─────
+        false_positive = 0
+        if action.action_type == ActionType.DETECT_BUG and action.bug:
+            # Check if the detected bug actually exists in the code
+            bug_exists = any(
+                b.line_number == action.bug.line_number and b.bug_type == action.bug.bug_type
+                for b in current_code.known_bugs
+            )
+            if not bug_exists:
+                false_positive = 1
+                # Also track false positives in info for debugging
+                self.false_positives = getattr(self, 'false_positives', 0) + 1
+
         # ── Reward shaping ────────────────────────────────────────────────────
         base_score = grade_result['score']
 
         # Step penalty: encourages efficiency (small penalty for each step taken)
         step_penalty = 0.02 * (self.step_count - 1)
+
+        # False positive penalty: prevents reward hacking by penalizing incorrect detections
+        false_positive_penalty = 0.1 * false_positive
 
         # Confidence calibration bonus: reward well-calibrated confidence
         confidence_bonus = 0.0
@@ -202,7 +221,8 @@ class CodeReviewEnvironment:
             elif base_score <= 0.3 and action.confidence >= 0.8:
                 confidence_bonus = -0.05
 
-        shaped_score = max(0.0, min(1.0, base_score - step_penalty + confidence_bonus))
+        # Apply all penalties and bonuses
+        shaped_score = max(0.0, min(1.0, base_score - step_penalty - false_positive_penalty + confidence_bonus))
 
         # Track rewards
         self.episode_rewards.append(shaped_score)
@@ -216,17 +236,19 @@ class CodeReviewEnvironment:
             breakdown={
                 **grade_result.get('breakdown', {}),
                 'step_penalty': -step_penalty,
+                'false_positive_penalty': -false_positive_penalty,
                 'confidence_bonus': confidence_bonus,
                 'raw_score': base_score,
+                'false_positive': false_positive,
             },
-            feedback=grade_result['feedback'],
+            feedback=grade_result['feedback'] + (f" (False positive penalty applied)" if false_positive else ""),
             bugs_correctly_found=grade_result.get('breakdown', {}).get('bugs_found', 0),
             bugs_missed=max(0, len(current_code.known_bugs) - grade_result.get('breakdown', {}).get('bugs_found', 0)),
-            false_positives=0
+            false_positives=false_positive
         )
 
         # Check task completion
-        task_complete = self._is_task_complete(task_config)
+        task_complete = self._is_task_complete(task_config, base_score)
         info = {
             'task_complete': task_complete,
             'task_id': self.current_task,
@@ -235,6 +257,8 @@ class CodeReviewEnvironment:
             'total_score': self.total_score,
             'episode_rewards': self.episode_rewards,
             'raw_score': base_score,
+            'false_positive': false_positive,
+            'false_positives_total': getattr(self, 'false_positives', 0),
         }
 
         if task_complete:
@@ -244,6 +268,8 @@ class CodeReviewEnvironment:
                 self.current_code_index = 0
                 self.step_count = 0
                 self.bugs_found = []
+                # Reset false positive counter for next task
+                self.false_positives = 0
             else:
                 self.done = True
                 info['episode_summary'] = self._build_episode_summary()
@@ -264,6 +290,7 @@ class CodeReviewEnvironment:
             metadata={
                 'using_dynamic_snippets': self.use_dynamic,
                 'done': self.done,
+                'false_positives': getattr(self, 'false_positives', 0),
             }
         )
 
@@ -278,10 +305,16 @@ class CodeReviewEnvironment:
                     self._snippet_pools[task_id] = generated
                     print(f"[Env] Generated {len(generated)} snippets for task {task_id}")
                 else:
-                    self._snippet_pools[task_id] = list(FALLBACK_SNIPPETS[task_id])
+                    self._snippet_pools[task_id] = sorted(
+                        list(FALLBACK_SNIPPETS[task_id]),
+                        key=lambda x: x.id
+                    )
         else:
             for task_id in [1, 2, 3]:
-                self._snippet_pools[task_id] = list(FALLBACK_SNIPPETS[task_id])
+                self._snippet_pools[task_id] = sorted(
+                    list(FALLBACK_SNIPPETS[task_id]),
+                    key=lambda x: x.id
+                )
 
     def _get_current_code(self) -> CodeSnippet:
         pool = self._snippet_pools.get(self.current_task, FALLBACK_SNIPPETS[self.current_task])
@@ -314,14 +347,37 @@ class CodeReviewEnvironment:
             }
         }[self.current_task]
 
-    def _is_task_complete(self, task_config: Dict) -> bool:
+    def _is_task_complete(self, task_config: Dict, base_score: float = 0.0) -> bool:
+        """Check if current task is complete with improved logic for Task 1."""
         current_code = self._get_current_code()
+
         if self.current_task == 1:
+            # CRITICAL FIX: Task completion now depends on correctness, not just any action
+            # Prevents agent from gaming the system by taking arbitrary actions
+
+            # Check if agent has taken any detection action
             has_acted = any(
                 a.action_type in (ActionType.DETECT_BUG, ActionType.SKIP)
                 for a in self.actions_taken
             )
-            return has_acted or self.step_count >= task_config['max_steps']
+
+            if not has_acted:
+                return False
+
+            # For clean code (no bugs), skip is correct
+            if not current_code.known_bugs:
+                # Check if agent correctly identified no bugs (via skip or detection with no bug)
+                correct_skip = any(
+                    a.action_type == ActionType.SKIP or
+                    (a.action_type == ActionType.DETECT_BUG and a.bug is None)
+                    for a in self.actions_taken
+                )
+                return correct_skip or self.step_count >= task_config['max_steps']
+
+            # For buggy code, completion requires high confidence detection
+            # Base score > 0.8 indicates correct detection with high confidence
+            return base_score > 0.8 or self.step_count >= task_config['max_steps']
+
         elif self.current_task == 2:
             return len(self.bugs_found) >= len(current_code.known_bugs) or self.step_count >= task_config['max_steps']
         else:
@@ -364,4 +420,5 @@ class CodeReviewEnvironment:
             'total_steps': len(self.actions_taken),
             'avg_reward': sum(self.episode_rewards) / len(self.episode_rewards) if self.episode_rewards else 0,
             'max_reward': max(self.episode_rewards) if self.episode_rewards else 0,
+            'total_false_positives': getattr(self, 'false_positives', 0),
         }
