@@ -1,11 +1,92 @@
 """
 3 Progressive Code Review Tasks with Programmatic Graders
 Easy → Medium → Hard
+Enhanced with semantic embedding scoring for fix suggestions
 """
 
 from typing import Dict, List, Set, Optional
 from .models import Bug, BugType, Severity, Action, ActionType, Reward
 import re
+import os
+import numpy as np
+
+# Try importing OpenAI for embeddings
+try:
+    from openai import OpenAI
+    OPENAI_AVAILABLE = True
+except ImportError:
+    OPENAI_AVAILABLE = False
+    print("[Warning] OpenAI not installed. Embedding scoring disabled. Falling back to keyword matching.")
+
+# ─── Embedding cache for performance ──────────────────────────────────────────
+_embedding_cache = {}
+_openai_client = None
+
+def _get_openai_client():
+    """Lazy initialization of OpenAI client"""
+    global _openai_client
+    if _openai_client is None and OPENAI_AVAILABLE:
+        api_key = os.getenv("OPENAI_API_KEY") or os.getenv("OPENAI_KEY")
+        if api_key:
+            _openai_client = OpenAI(api_key=api_key)
+        else:
+            print("[Warning] OPENAI_API_KEY not set. Embedding scoring disabled.")
+    return _openai_client
+
+def get_embedding(text: str, model: str = "text-embedding-3-small") -> Optional[List[float]]:
+    """
+    Get embedding for text with caching.
+
+    Args:
+        text: Input text to embed
+        model: OpenAI embedding model
+
+    Returns:
+        Embedding vector or None if unavailable
+    """
+    # Truncate long texts to avoid token limits
+    text = text[:8000]
+
+    # Check cache first
+    cache_key = f"{model}:{text}"
+    if cache_key in _embedding_cache:
+        return _embedding_cache[cache_key]
+
+    # Get from API
+    client = _get_openai_client()
+    if not client:
+        return None
+
+    try:
+        response = client.embeddings.create(model=model, input=text)
+        embedding = response.data[0].embedding
+        _embedding_cache[cache_key] = embedding
+        return embedding
+    except Exception as e:
+        print(f"[Embedding Error] {e}")
+        return None
+
+def cosine_similarity(a: List[float], b: List[float]) -> float:
+    """Calculate cosine similarity between two vectors."""
+    a = np.array(a)
+    b = np.array(b)
+    if np.linalg.norm(a) == 0 or np.linalg.norm(b) == 0:
+        return 0.0
+    return float(np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b)))
+
+def semantic_similarity(text1: str, text2: str) -> Optional[float]:
+    # 🔥 FORCE deterministic behavior in evaluation
+    if os.getenv("EVAL_MODE") == "true":
+        return None
+
+    emb1 = get_embedding(text1)
+    emb2 = get_embedding(text2)
+
+    if emb1 is None or emb2 is None:
+        return None
+
+    return cosine_similarity(emb1, emb2)
+
 
 # ============ Base Grader ============
 
@@ -48,6 +129,7 @@ class TaskGrader:
             'f1': f1,
             'matches': matches
         }
+
 
 # ============ Task 1: Bug Detection (Easy) ============
 
@@ -127,6 +209,7 @@ class BugDetectionGrader(TaskGrader):
                     'breakdown': {'detection': 0.0}
                 }
 
+
 # ============ Task 2: Find and Classify Bugs (Medium) ============
 
 class BugClassificationGrader(TaskGrader):
@@ -202,14 +285,28 @@ class BugClassificationGrader(TaskGrader):
             }
         }
 
-# ============ Task 3: Suggest Fix (Hard) ============
+
+# ============ Task 3: Suggest Fix (Hard) - ENHANCED ============
 
 class FixSuggestionGrader(TaskGrader):
     """
     Task 3: Suggest correct fix for the bug
     Difficulty: Hard
     Scoring: Based on fix quality, explanation, and accuracy
+
+    ENHANCEMENT: Uses semantic embedding similarity instead of keyword matching
     """
+
+    # Weight configuration for different scoring components
+    SEMANTIC_WEIGHT = 0.6      # Semantic similarity (embeddings)
+    LENGTH_WEIGHT = 0.2        # Length appropriateness
+    SYNTAX_WEIGHT = 0.2        # Code syntax quality
+
+    # Semantic similarity thresholds
+    SIM_EXCELLENT = 0.85   # Perfect or near-perfect match
+    SIM_GOOD = 0.70        # Good match, minor differences
+    SIM_DECENT = 0.50      # Decent match, captures core idea
+    SIM_POOR = 0.30        # Poor match, some relation
 
     def grade(self, ground_truth: List[Bug], action: Action, context: dict) -> Dict:
         if action.action_type != ActionType.SUGGEST_FIX:
@@ -236,25 +333,7 @@ class FixSuggestionGrader(TaskGrader):
             }
 
         # Find the corresponding ground truth
-        # Strategy: match by bug_type first (flexible), then try line_number (strict)
-        truth_bug = None
-
-        # Pass 1: exact match (line + type)
-        for bug in ground_truth:
-            if bug.line_number == target_bug.line_number and bug.bug_type == target_bug.bug_type:
-                truth_bug = bug
-                break
-
-        # Pass 2: match by bug_type only (agent may have wrong line number)
-        if not truth_bug:
-            for bug in ground_truth:
-                if bug.bug_type == target_bug.bug_type:
-                    truth_bug = bug
-                    break
-
-        # Pass 3: just use the first ground truth bug (Task 3 has 1 bug per snippet)
-        if not truth_bug and ground_truth:
-            truth_bug = ground_truth[0]
+        truth_bug = self._match_bug_to_ground_truth(target_bug, ground_truth)
 
         if not truth_bug:
             return {
@@ -263,8 +342,8 @@ class FixSuggestionGrader(TaskGrader):
                 'breakdown': {'exists': 0.0}
             }
 
-        # Grade the fix suggestion
-        fix_score = self._grade_fix_quality(
+        # Grade the fix suggestion with enhanced semantic scoring
+        fix_score = self._grade_fix_quality_enhanced(
             action.fix_suggestion,
             truth_bug.suggested_fix or "",
             action.explanation
@@ -275,7 +354,271 @@ class FixSuggestionGrader(TaskGrader):
 
         total_score = (fix_score * 0.7) + (explanation_score * 0.3)
 
-        # Build feedback
+        # Build detailed feedback
+        feedback = self._build_feedback(total_score, fix_score, action.fix_suggestion, truth_bug.suggested_fix)
+
+        return {
+            'score': total_score,
+            'feedback': feedback,
+            'breakdown': {
+                'fix_quality': fix_score,
+                'explanation': explanation_score,
+                'semantic_score': float(getattr(self, '_last_semantic_score', 0.0) or 0.0),
+                'keyword_score': float(getattr(self, '_last_keyword_score', 0.0) or 0.0),
+            }
+        }
+
+    def _match_bug_to_ground_truth(self, target_bug: Bug, ground_truth: List[Bug]) -> Optional[Bug]:
+        """Match the agent's target bug to ground truth bugs"""
+        # Pass 1: exact match (line + type)
+        for bug in ground_truth:
+            if bug.line_number == target_bug.line_number and bug.bug_type == target_bug.bug_type:
+                return bug
+
+        # Pass 2: match by bug_type only (agent may have wrong line number)
+        for bug in ground_truth:
+            if bug.bug_type == target_bug.bug_type:
+                return bug
+
+        # Pass 3: just use the first ground truth bug (Task 3 has 1 bug per snippet)
+        if ground_truth:
+            return ground_truth[0]
+
+        return None
+
+    def _grade_fix_quality_enhanced(self, suggestion: str, expected: str, explanation: str = None) -> float:
+        """
+        Grade the quality of the fix suggestion using semantic embeddings.
+
+        This replaces the keyword-based scoring with semantic similarity,
+        making the grader more robust to different phrasings and synonyms.
+        """
+        suggestion_lower = suggestion.lower()
+        expected_lower = expected.lower()
+
+        # ─── 1. SEMANTIC SIMILARITY SCORE (using embeddings) ────────────────
+        semantic_score = self._compute_semantic_score(suggestion, expected)
+        self._last_semantic_score = semantic_score
+
+        # ─── 2. KEYWORD SCORE (fallback if embeddings fail) ─────────────────
+        # Keep keyword matching as fallback for when embeddings are unavailable
+        keyword_score = self._compute_keyword_score(suggestion_lower, expected_lower)
+        self._last_keyword_score = keyword_score
+
+        # Choose primary scoring method (semantic if available, else keyword)
+        if semantic_score is not None:
+            primary_score = semantic_score
+            scoring_method = "semantic"
+        else:
+            primary_score = keyword_score
+            scoring_method = "keyword"
+
+        # ─── 3. LENGTH SCORE ────────────────────────────────────────────────
+        length_score = self._compute_length_score(len(suggestion))
+
+        # ─── 4. SYNTAX SCORE (code quality) ─────────────────────────────────
+        syntax_score = self._compute_syntax_score(suggestion)
+
+        # ─── 5. COMBINED SCORE ──────────────────────────────────────────────
+        total = (
+            (primary_score * self.SEMANTIC_WEIGHT) +
+            (length_score * self.LENGTH_WEIGHT) +
+            (syntax_score * self.SYNTAX_WEIGHT)
+        )
+
+        return min(total, 1.0)
+
+    def _compute_semantic_score(self, suggestion: str, expected: str) -> Optional[float]:
+        """
+        Compute semantic similarity score using embeddings.
+        Returns None if embeddings are unavailable.
+        """
+        try:
+            similarity = semantic_similarity(suggestion, expected)
+
+            if similarity is None:
+                return None
+
+            # Convert similarity to score based on thresholds
+            if similarity >= self.SIM_EXCELLENT:
+                return 1.0
+            elif similarity >= self.SIM_GOOD:
+                # Linear interpolation between 0.7 and 1.0
+                return 0.7 + (similarity - self.SIM_GOOD) / (self.SIM_EXCELLENT - self.SIM_GOOD) * 0.3
+            elif similarity >= self.SIM_DECENT:
+                # Linear interpolation between 0.5 and 0.7
+                return 0.5 + (similarity - self.SIM_DECENT) / (self.SIM_GOOD - self.SIM_DECENT) * 0.2
+            elif similarity >= self.SIM_POOR:
+                # Linear interpolation between 0.2 and 0.5
+                return 0.2 + (similarity - self.SIM_POOR) / (self.SIM_DECENT - self.SIM_POOR) * 0.3
+            else:
+                # Very low similarity
+                return max(0.0, similarity * 0.5)  # Cap at 0.5 * similarity
+
+        except Exception as e:
+            print(f"[Semantic Scoring Error] {e}")
+            return None
+
+    def _compute_keyword_score(self, suggestion: str, expected: str) -> float:
+        """Fallback keyword-based scoring when embeddings unavailable."""
+        # Extract meaningful keywords (ignore common words)
+        stop_words = {'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for',
+                      'of', 'with', 'by', 'from', 'up', 'down', 'is', 'are', 'was', 'were'}
+
+        words = re.findall(r'\b\w+\b', expected)
+        keywords = [w for w in words if w.lower() not in stop_words and len(w) > 2]
+
+        if not keywords:
+            return 0.5
+
+        # Check for exact keyword matches
+        keyword_matches = sum(1 for kw in keywords if kw.lower() in suggestion)
+        keyword_score = keyword_matches / len(keywords)
+
+        # Bonus for synonym detection (simple word2vec alternative)
+        # Check for common synonym pairs
+        synonym_bonus = self._check_synonyms(suggestion, expected)
+
+        return min(keyword_score + synonym_bonus, 1.0)
+
+    def _check_synonyms(self, suggestion: str, expected: str) -> float:
+        """Simple synonym detection for common programming terms."""
+        synonym_pairs = [
+            (r'\block\b', r'\bsynchronize\b|\bthread.?safe\b'),
+            (r'\bparameterized\b', r'\bplaceholder\b|\b\?.*\b'),
+            (r'\bescape\b', r'\bsanitize\b|\bencode\b'),
+            (r'\btimeout\b', r'\bmax.?time\b|\bdeadline\b'),
+            (r'\bcache\b', r'\bmemoize\b|\bstorage\b'),
+        ]
+
+        bonus = 0.0
+        for pattern, synonyms in synonym_pairs:
+            if re.search(pattern, expected.lower()) and re.search(synonyms, suggestion.lower()):
+                bonus += 0.05
+
+        return min(bonus, 0.2)
+
+    def _compute_length_score(self, length: int) -> float:
+        """Score based on fix suggestion length appropriateness."""
+        if 20 <= length <= 200:
+            return 1.0
+        elif 10 <= length < 20:
+            return 0.7
+        elif 200 < length <= 500:
+            return 0.8
+        elif 5 <= length < 10:
+            return 0.4
+        else:
+            return 0.2
+
+    def _compute_syntax_score(self, suggestion: str) -> float:
+        """Score based on code syntax quality in the suggestion."""
+        score = 0.0
+
+        # Code block indicators
+        if '```' in suggestion:
+            score += 0.3
+
+        # Function/class definitions
+        if re.search(r'\b(def|class|async def)\b', suggestion):
+            score += 0.2
+
+        # Return statements
+        if re.search(r'\breturn\b', suggestion):
+            score += 0.1
+
+        # Import statements
+        if re.search(r'\bimport\b|\bfrom\b', suggestion):
+            score += 0.1
+
+        # Variable assignments
+        if re.search(r'=', suggestion):
+            score += 0.1
+
+        # Conditional statements
+        if re.search(r'\bif\b|\belse\b|\btry\b|\bexcept\b', suggestion):
+            score += 0.2
+
+        return min(score, 1.0)
+
+    def _build_feedback(self, total_score: float, fix_score: float,
+                        suggestion: str, expected: str) -> str:
+        """Build detailed feedback message."""
+        if total_score >= 0.9:
+            return f"✓ Excellent fix suggestion! Clean and semantically accurate."
+        elif total_score >= 0.8:
+            return f"✓ Very good fix! Captures the core solution well."
+        elif total_score >= 0.7:
+            return f"✓ Good fix! {suggestion[:100]}..."
+        elif total_score >= 0.6:
+            return f"👍 Decent fix. Expected approach: {expected[:100]}"
+        elif total_score >= 0.5:
+            return f"👍 Acceptable fix, but could be improved. Expected: {expected[:100]}"
+        elif total_score >= 0.3:
+            return f"⚠️ Partial fix. The idea is there but needs work. Expected: {expected[:100]}"
+        else:
+            return f"✗ Fix needs significant improvement. Expected something like: {expected[:100]}"
+
+
+# ============ Legacy fallback (for backward compatibility) ============
+
+class FixSuggestionGraderLegacy(TaskGrader):
+    """
+    Legacy grader that uses only keyword matching.
+    Kept for backward compatibility.
+    """
+
+    def grade(self, ground_truth: List[Bug], action: Action, context: dict) -> Dict:
+        # Same as original implementation
+        if action.action_type != ActionType.SUGGEST_FIX:
+            return {
+                'score': 0.0,
+                'feedback': f"Wrong action. Use SUGGEST_FIX for this task.",
+                'breakdown': {'action_type': 0.0}
+            }
+
+        if not action.fix_suggestion:
+            return {
+                'score': 0.0,
+                'feedback': "No fix suggestion provided.",
+                'breakdown': {'fix_provided': 0.0}
+            }
+
+        target_bug = context.get('target_bug')
+        if not target_bug:
+            return {
+                'score': 0.0,
+                'feedback': "No bug specified to fix.",
+                'breakdown': {'target': 0.0}
+            }
+
+        # Find matching ground truth
+        truth_bug = None
+        for bug in ground_truth:
+            if bug.line_number == target_bug.line_number and bug.bug_type == target_bug.bug_type:
+                truth_bug = bug
+                break
+
+        if not truth_bug and ground_truth:
+            truth_bug = ground_truth[0]
+
+        if not truth_bug:
+            return {
+                'score': 0.0,
+                'feedback': "No ground truth bug found to grade against.",
+                'breakdown': {'exists': 0.0}
+            }
+
+        # Original keyword-based scoring
+        fix_score = self._grade_fix_quality_legacy(
+            action.fix_suggestion,
+            truth_bug.suggested_fix or "",
+            action.explanation
+        )
+
+        explanation_score = 0.3 if action.explanation else 0.0
+        total_score = (fix_score * 0.7) + (explanation_score * 0.3)
+
         if total_score >= 0.9:
             feedback = f"✓ Excellent fix suggestion! Clean and well-explained."
         elif total_score >= 0.7:
@@ -294,17 +637,15 @@ class FixSuggestionGrader(TaskGrader):
             }
         }
 
-    def _grade_fix_quality(self, suggestion: str, expected: str, explanation: str = None) -> float:
-        """Grade the quality of the fix suggestion"""
+    def _grade_fix_quality_legacy(self, suggestion: str, expected: str, explanation: str = None) -> float:
+        """Original keyword-based scoring (preserved for comparison)"""
         suggestion_lower = suggestion.lower()
         expected_lower = expected.lower()
 
-        # Check for keywords
         keywords = re.findall(r'\b\w+\b', expected_lower)
         keyword_matches = sum(1 for kw in keywords if kw in suggestion_lower)
         keyword_score = keyword_matches / len(keywords) if keywords else 0.5
 
-        # Check length (not too short, not too long)
         length = len(suggestion)
         if 20 <= length <= 200:
             length_score = 1.0
@@ -315,11 +656,9 @@ class FixSuggestionGrader(TaskGrader):
         else:
             length_score = 0.3
 
-        # Check for code syntax (has code blocks or proper syntax)
         has_code = '```' in suggestion or 'def ' in suggestion or 'return ' in suggestion
         syntax_score = 0.3 if has_code else 0.0
 
-        # Check explanation quality
         explanation_score = 0.0
         if explanation:
             exp_len = len(explanation)
@@ -328,7 +667,5 @@ class FixSuggestionGrader(TaskGrader):
             elif exp_len > 20:
                 explanation_score = 0.2
 
-        # Combined score
         total = (keyword_score * 0.5) + (length_score * 0.2) + (syntax_score * 0.2) + (explanation_score * 0.1)
-
         return min(total, 1.0)
