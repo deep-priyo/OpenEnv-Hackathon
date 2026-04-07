@@ -18,9 +18,8 @@ dependencies = [
     "openenv-core>=0.2.0"
 ]
 
-# 🔥 THIS IS CRITICAL (server entrypoint)
 [project.scripts]
-server = "server.app:app"
+server = "server.app:main"
 
 [tool.setuptools.packages.find]
 where = ["."]
