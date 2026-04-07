@@ -132,7 +132,8 @@ def main():
 
     print(f"[Config] Dynamic snippets: {use_dynamic} | Episodes: {args.episodes}")
 
-    env = CodeReviewEnvironment(use_dynamic_snippets=use_dynamic)
+    os.environ["EVAL_MODE"] = "true"
+    env = CodeReviewEnvironment(use_dynamic_snippets=False)
     agent = CodeReviewAgent()
 
     all_summaries = []
