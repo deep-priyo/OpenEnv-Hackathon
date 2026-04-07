@@ -130,7 +130,7 @@ class SnippetGenerator:
                 prompt = TASK3_PROMPT.format(scenario=random.choice(SCENARIOS))
 
             response = self.client.chat.completions.create(
-                model="gpt-4o-mini",
+                model=os.getenv("MODEL_NAME", "gpt-4o-mini"),
                 temperature=0.6,
                 max_tokens=900,
                 messages=[
