@@ -15,7 +15,7 @@ from api_routes import api
 app = Flask(__name__)
 CORS(app, origins=['http://localhost:3000', 'http://localhost:3001', 'http://localhost:5173'])
 app.register_blueprint(api)
-
+app.register_blueprint(api, url_prefix="/api")
 @app.route('/', methods=['GET'])
 def index():
     return jsonify({
