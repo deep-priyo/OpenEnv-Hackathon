@@ -98,36 +98,63 @@ class TaskGrader:
         raise NotImplementedError
 
     def _calculate_precision_recall(self, found: List[Bug], expected: List[Bug]) -> Dict:
-        """Calculate precision and recall metrics"""
+        """Calculate precision and recall metrics with partial credit for near-matches"""
         if not found and not expected:
-            return {'precision': 1.0, 'recall': 1.0, 'f1': 1.0, 'matches': 0}
+            return {'precision': 1.0, 'recall': 1.0, 'f1': 1.0, 'matches': 0.0}
 
         if not found:
-            return {'precision': 0.0, 'recall': 0.0, 'f1': 0.0, 'matches': 0}
+            return {'precision': 0.0, 'recall': 0.0, 'f1': 0.0, 'matches': 0.0}
 
         if not expected:
-            return {'precision': 0.0, 'recall': 1.0, 'f1': 0.0, 'matches': 0}
+            return {'precision': 0.0, 'recall': 1.0, 'f1': 0.0, 'matches': 0.0}
 
-        # Match bugs by line number and type
-        matches = 0
-        matched_found = []
-        for exp in expected:
-            for f in found:
+        # Match bugs by line number and type with partial credit
+        total_matches = 0.0
+        matched_found_indices = set()
+        matched_expected_indices = set()
+
+        # Pass 1: Exact matches (priority)
+        for i_exp, exp in enumerate(expected):
+            for i_f, f in enumerate(found):
+                if i_f in matched_found_indices:
+                    continue
                 if f.line_number == exp.line_number and f.bug_type == exp.bug_type:
-                    if f not in matched_found:
-                        matches += 1
-                        matched_found.append(f)
-                        break
+                    total_matches += 1.0
+                    matched_found_indices.add(i_f)
+                    matched_expected_indices.add(i_exp)
+                    break
 
-        precision = matches / len(found) if found else 0
-        recall = matches / len(expected) if expected else 0
+        # Pass 2: Partial matches (wrong type or nearby line)
+        for i_exp, exp in enumerate(expected):
+            if i_exp in matched_expected_indices:
+                continue
+            for i_f, f in enumerate(found):
+                if i_f in matched_found_indices:
+                    continue
+
+                # Match same line but wrong type
+                if f.line_number == exp.line_number:
+                    total_matches += 0.5
+                    matched_found_indices.add(i_f)
+                    matched_expected_indices.add(i_exp)
+                    break
+
+                # Match same type but nearby line (±1)
+                if f.bug_type == exp.bug_type and abs(f.line_number - exp.line_number) <= 1:
+                    total_matches += 0.5
+                    matched_found_indices.add(i_f)
+                    matched_expected_indices.add(i_exp)
+                    break
+
+        precision = total_matches / len(found) if found else 0
+        recall = total_matches / len(expected) if expected else 0
         f1 = 2 * (precision * recall) / (precision + recall) if (precision + recall) > 0 else 0
 
         return {
             'precision': precision,
             'recall': recall,
             'f1': f1,
-            'matches': matches
+            'matches': total_matches
         }
 
 
@@ -249,13 +276,28 @@ class BugClassificationGrader(TaskGrader):
         metrics = self._calculate_precision_recall(found_bugs, ground_truth)
 
         # Additional: check severity classification quality
-        severity_correct = 0
-        for found in found_bugs:
-            for truth in ground_truth:
-                if (found.line_number == truth.line_number and
-                    found.bug_type == truth.bug_type and
-                    found.severity == truth.severity):
-                    severity_correct += 1
+        severity_correct = 0.0
+        matched_severity_expected = set()
+        matched_severity_found = set()
+
+        # Check for severity matches on correctly identified bugs
+        for i_f, found in enumerate(found_bugs):
+            for i_exp, truth in enumerate(ground_truth):
+                if i_exp in matched_severity_expected or i_f in matched_severity_found:
+                    continue
+
+                # Must match line and type at least partially to count for severity accuracy
+                line_match = (found.line_number == truth.line_number)
+                type_match = (found.bug_type == truth.bug_type)
+                nearby_line = abs(found.line_number - truth.line_number) <= 1
+
+                if (line_match and type_match) or (line_match or (type_match and nearby_line)):
+                    if found.severity == truth.severity:
+                        severity_correct += 1.0
+                    else:
+                        severity_correct += 0.5  # Partial credit for finding bug even if severity slightly off
+                    matched_severity_expected.add(i_exp)
+                    matched_severity_found.add(i_f)
                     break
 
         severity_score = severity_correct / len(ground_truth) if ground_truth else 1.0
