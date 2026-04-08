@@ -25,4 +25,11 @@ colorama==0.4.6
 
 openai
 
-numpy
+flask
+flask-cors
+pydantic
+openai>=1.0.0
+numpy>=1.24.0
+openenv-core
+pyyaml
+requests

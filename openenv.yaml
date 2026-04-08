@@ -1,72 +1,106 @@
-# openenv.yaml
-# OpenEnv Compliance Manifest
-# Required for hackathon submission
-
 name: code-review-environment
-version: "2.0.0"
+version: 2.0.0
 description: >
-  A reinforcement learning environment where AI agents learn to review code.
-  Agents progress through 3 tasks of increasing difficulty: bug detection (easy),
-  bug classification (medium), and fix suggestion (hard).
+  An OpenEnv RL environment for AI code review agents. Agents must detect bugs,
+  classify their type and severity, and suggest fixes across three progressive tasks.
 
-author: "hackathon-team"
-license: MIT
+author: deep-priyo
+repository: https://github.com/deep-priyo/OpenEnv-Hackathon
+space: https://huggingface.co/spaces/deep-piryo/openenv-hackathon
 
-# ─── Environment Metadata ────────────────────────────────────────────────────
+# Runtime entrypoint
+entrypoint: backend.app
+port: 7860
 
-deterministic: true
+# API endpoints
+endpoints:
+  reset: POST /reset
+  step: POST /step
+  state: GET /state
+  metadata: GET /metadata
+  health: GET /health
 
+# Environment configuration
 environment:
-  class: CodeReviewEnvironment
-  module: backend.environment  # ✅ Correct - points to backend/environment/
-  init_args:
-    use_dynamic_snippets: false
-
-# ─── Tasks (MUST have exactly 3 with graders) ────────────────────────────────
+  max_episode_steps: 8
+  reward_range: [0.01, 0.99]
+  observation_space: CodeReviewContext
+  action_space: Action
 
 tasks:
   - id: 1
     name: Bug Detection
     difficulty: easy
     max_steps: 3
-    description: "Binary classification: does this code contain a bug?"
+    description: >
+      Detect whether the given code snippet contains a bug.
+      Use DETECT_BUG action if a bug is found, or SKIP if the code is clean.
     grader: BugDetectionGrader
-    grader_module: backend.environment.tasks  # ✅ FIXED - points to backend/environment/tasks.py
-    
+    grader_module: backend.environment.tasks
+
   - id: 2
     name: Bug Classification
     difficulty: medium
     max_steps: 6
-    description: "Find ALL bugs and classify their type and severity correctly"
+    description: >
+      Find ALL bugs in the code snippet and classify each by type (security,
+      logic, performance, etc.) and severity (critical, high, medium, low).
+      Use repeated DETECT_BUG actions — one per bug found.
     grader: BugClassificationGrader
-    grader_module: backend.environment.tasks  # ✅ FIXED
-    
+    grader_module: backend.environment.tasks
+
   - id: 3
     name: Fix Suggestion
     difficulty: hard
     max_steps: 4
-    description: "Suggest a detailed, correct fix for the identified bug"
+    description: >
+      Identify the complex architectural bug in the code and suggest a detailed,
+      correct fix. Use SUGGEST_FIX action with fix_suggestion and explanation fields.
     grader: FixSuggestionGrader
-    grader_module: backend.environment.tasks  # ✅ FIXED
+    grader_module: backend.environment.tasks
 
-# ─── API Configuration ───────────────────────────────────────────────────────
+# Grader implementations
+graders:
+  BugDetectionGrader:
+    module: backend.environment.tasks
+    class: BugDetectionGrader
+    description: >
+      Binary grader — scores 1.0 if the agent correctly identifies whether a bug
+      exists. Partial credit (0.5) if the bug is found but misclassified.
 
-api:
+  BugClassificationGrader:
+    module: backend.environment.tasks
+    class: BugClassificationGrader
+    description: >
+      Multi-label grader — scores based on F1 of bugs found vs expected,
+      weighted with severity accuracy. Supports partial credit for near-matches.
+
+  FixSuggestionGrader:
+    module: backend.environment.tasks
+    class: FixSuggestionGrader
+    description: >
+      Fix quality grader — scores based on semantic similarity (embedding-based)
+      of the suggested fix vs ground truth, plus length and syntax quality bonuses.
+
+# Reward shaping
+reward:
+  shape: shaped
+  step_penalty: -0.05
+  confidence_bonus: true
+  clamp: [0.01, 0.99]
+
+# Dependencies
+dependencies:
+  python: ">=3.11"
+  packages:
+    - flask
+    - flask-cors
+    - pydantic
+    - openai
+    - numpy
+
+# Docker
+docker:
+  base_image: python:3.11-slim
   port: 7860
-  endpoints:
-    reset: /reset
-    step: /step
-    state: /state
-    health: /health
-    metadata: /metadata
-
-# ─── Validation ──────────────────────────────────────────────────────────────
-
-validation:
-  max_steps_per_episode: 15
-  success_threshold: 0.3
-  required_endpoints:
-    - /reset
-    - /step
-    - /state
-    - /health
+  health_check: GET /health
