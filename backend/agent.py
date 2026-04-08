@@ -6,6 +6,7 @@ Fixes over v2:
 - Task 3: fix_suggestion enriched with full before/after code blocks for higher semantic score
 - max_tokens raised to 1200 to prevent JSON truncation
 - Feedback-aware hint injection when recent scores are low
+- FIXED: AttributeError when accessing bug_type.value
 """
 
 import json
@@ -13,7 +14,7 @@ import re
 import os
 import sys
 from openai import OpenAI
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Set, Tuple
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from environment.models import Action, ActionType, Bug, BugType, Severity
@@ -127,10 +128,11 @@ class CodeReviewAgent:
         self.total_calls = 0
         self.total_score = 0.0
 
-        # Task 2 state — keyed by code snippet id to avoid re-querying same snippet
+        # Task 2 state
         self._t2_cache_key: Optional[str] = None
         self._t2_queue: List[Dict] = []
         self._last_task_id = 0
+        self._reported_bugs: Set[Tuple[int, str]] = set()
 
     # ─── Public API ───────────────────────────────────────────────────────────
 
@@ -140,12 +142,20 @@ class CodeReviewAgent:
         task_id = observation.current_task
         code_id = observation.code_context.code.id
 
-        # Reset Task 2 queue only when moving to a new task (not between steps)
+        print(f"[Agent] Acting on Task {task_id}, Code: {filename}")
+
+        # Reset state when task changes
         if task_id != self._last_task_id:
+            print(f"[Agent] Task changed from {self._last_task_id} to {task_id}")
             self._last_task_id = task_id
-            if task_id != 2:
+            if task_id == 2:
                 self._t2_cache_key = None
                 self._t2_queue = []
+                self._reported_bugs = set()
+            else:
+                self._t2_cache_key = None
+                self._t2_queue = []
+                self._reported_bugs = set()
 
         if task_id == 1:
             return self._act_task1(code, filename)
@@ -171,25 +181,37 @@ class CodeReviewAgent:
         self._t2_cache_key = None
         self._t2_queue = []
         self._last_task_id = 0
+        self._reported_bugs = set()
 
     # ─── Task 1: single bug detection ─────────────────────────────────────────
 
     def _act_task1(self, code: str, filename: str) -> Action:
+        print(f"[Agent] Task 1: Detecting bugs in {filename}")
+        
         data = self._call_llm(TASK1_PROMPT.format(
             filename=filename,
             numbered_code=_number_lines(code),
             bug_types=", ".join(VALID_BUG_TYPES),
             severities=", ".join(VALID_SEVERITIES),
         ))
+        
         if not data or data.get("action_type", "skip") == "skip":
+            print("[Agent] Task 1: No bugs found, skipping")
             return Action(
                 action_type=ActionType.SKIP,
                 confidence=float((data or {}).get("confidence", 0.8)),
                 explanation=(data or {}).get("explanation", ""),
             )
+        
         bug = self._build_bug(data.get("bug") or {})
         if not bug:
+            print("[Agent] Task 1: Failed to build bug, skipping")
             return Action(action_type=ActionType.SKIP, confidence=0.4)
+        
+        # FIXED: Safely get bug type string
+        bug_type_str = bug.bug_type.value if hasattr(bug.bug_type, 'value') else str(bug.bug_type)
+        print(f"[Agent] Task 1: Found bug at line {bug.line_number} - {bug_type_str}")
+        
         return Action(
             action_type=ActionType.DETECT_BUG,
             bug=bug,
@@ -200,8 +222,26 @@ class CodeReviewAgent:
     # ─── Task 2: find ALL bugs ────────────────────────────────────────────────
 
     def _act_task2(self, code: str, filename: str, code_id: str, observation) -> Action:
+        print(f"[Agent] Task 2: Finding all bugs in {filename}")
+        
+        # Get already reported bugs from environment
+        already_reported: Set[Tuple[int, str]] = set()
+        for b in (observation.code_context.bugs_found or []):
+            if isinstance(b, dict):
+                line = b.get("line_number")
+                bug_type = str(b.get("bug_type", "")).lower()
+                if line is not None:
+                    already_reported.add((line, bug_type))
+            else:
+                # FIXED: Handle both string and enum
+                bug_type_str = b.bug_type.value if hasattr(b.bug_type, 'value') else str(b.bug_type)
+                already_reported.add((b.line_number, bug_type_str.lower()))
+        
+        print(f"[Agent] Task 2: Already reported {len(already_reported)} bugs")
+        
         # Only call LLM once per unique code snippet
         if self._t2_cache_key != code_id:
+            print("[Agent] Task 2: Calling LLM to discover all bugs")
             data = self._call_llm(TASK2_PROMPT.format(
                 filename=filename,
                 numbered_code=_number_lines(code),
@@ -210,27 +250,25 @@ class CodeReviewAgent:
             ))
             self._t2_queue = list(data.get("bugs", []))
             self._t2_cache_key = code_id
-            if os.getenv("EVAL_MODE") != "true":
-                print(f"[Agent] Task 2: discovered {len(self._t2_queue)} bug(s) in {filename}")
-        # Collect already-reported (line, type) pairs from environment
-        already_reported: set = set()
-        for b in (observation.code_context.bugs_found or []):
-            if isinstance(b, dict):
-                already_reported.add((b.get("line_number"), str(b.get("bug_type", "")).lower()))
-            else:
-                already_reported.add((b.line_number, str(b.bug_type).lower()))
-
-        # Find next un-reported bug, keep the rest in queue
+            print(f"[Agent] Task 2: Discovered {len(self._t2_queue)} total bug(s)")
+        
+        # Find next unreported bug
         chosen = None
         remaining = []
+        
         for raw_bug in self._t2_queue:
-            key = (raw_bug.get("line_number"), str(raw_bug.get("bug_type", "")).lower())
+            line = raw_bug.get("line_number")
+            bug_type = str(raw_bug.get("bug_type", "")).lower()
+            key = (line, bug_type)
+            
             if chosen is None and key not in already_reported:
                 chosen = raw_bug
+                print(f"[Agent] Task 2: Reporting bug at line {line} - {bug_type}")
             else:
                 remaining.append(raw_bug)
+        
         self._t2_queue = remaining
-
+        
         if chosen:
             bug = self._build_bug(chosen)
             if bug:
@@ -240,38 +278,46 @@ class CodeReviewAgent:
                     confidence=0.88,
                     explanation=chosen.get("description", ""),
                 )
-
-        return Action(action_type=ActionType.SKIP, confidence=0.5, explanation="No more bugs in queue.")
+        
+        print("[Agent] Task 2: All bugs reported, skipping")
+        return Action(
+            action_type=ActionType.SKIP, 
+            confidence=0.9, 
+            explanation="All bugs have been reported."
+        )
 
     # ─── Task 3: detailed fix suggestion ──────────────────────────────────────
 
     def _act_task3(self, code: str, filename: str) -> Action:
+        print(f"[Agent] Task 3: Generating fix suggestion for {filename}")
+        
         data = self._call_llm(TASK3_PROMPT.format(
             filename=filename,
             numbered_code=_number_lines(code),
             bug_types=", ".join(VALID_BUG_TYPES),
             severities=", ".join(VALID_SEVERITIES),
         ))
+        
         if not data:
+            print("[Agent] Task 3: No response from LLM")
             return Action(action_type=ActionType.SKIP, confidence=0.1)
 
         bug = self._build_bug(data.get("bug") or {})
         fix_suggestion = data.get("fix_suggestion", "").strip()
         explanation = data.get("explanation", "").strip()
 
-        # Guarantee fix_suggestion is populated
         if not fix_suggestion:
             fix_suggestion = (data.get("bug") or {}).get("suggested_fix", "")
 
-        # Guarantee a ```python block is present (earns syntax_score bonus)
         if fix_suggestion and "```python" not in fix_suggestion:
             raw_fix = (data.get("bug") or {}).get("suggested_fix", fix_suggestion)
             fix_suggestion = f"{fix_suggestion}\n\n```python\n{raw_fix}\n```"
 
-        # Append explanation to enrich semantic content
         if explanation and len(explanation) > 30 and explanation not in fix_suggestion:
             fix_suggestion = f"{fix_suggestion}\n\n{explanation}"
 
+        print(f"[Agent] Task 3: Generated fix suggestion ({len(fix_suggestion)} chars)")
+        
         return Action(
             action_type=ActionType.SUGGEST_FIX,
             bug=bug,
@@ -283,7 +329,6 @@ class CodeReviewAgent:
     # ─── LLM plumbing ─────────────────────────────────────────────────────────
 
     def _call_llm(self, prompt: str, retries: int = 2) -> Dict:
-        # Inject low-score feedback as a correction hint
         if self.learning_memory:
             recent = self.learning_memory[-2:]
             if any(m["score"] < 0.6 for m in recent):
@@ -303,7 +348,10 @@ class CodeReviewAgent:
                         {"role": "user", "content": prompt},
                     ],
                 )
-                parsed = self._safe_parse_json(resp.choices[0].message.content.strip())
+                raw_content = resp.choices[0].message.content.strip()
+                print(f"[Agent] LLM response received ({len(raw_content)} chars)")
+                
+                parsed = self._safe_parse_json(raw_content)
                 if parsed is not None:
                     return parsed
                 print(f"[Agent] JSON parse failed (attempt {attempt+1}/{retries+1})")
@@ -322,7 +370,6 @@ class CodeReviewAgent:
             except json.JSONDecodeError:
                 pass
 
-        # Brace-depth extraction
         try:
             start = raw.index("{")
             depth = 0
@@ -355,13 +402,17 @@ class CodeReviewAgent:
             except ValueError:
                 severity = Severity.MEDIUM
 
+            confidence_val = raw.get("confidence", 0.85)
+            if isinstance(confidence_val, str):
+                confidence_val = float(confidence_val)
+
             return Bug(
                 line_number=max(1, int(raw.get("line_number", 1))),
                 bug_type=bug_type,
                 severity=severity,
                 description=str(raw.get("description", "No description")),
                 suggested_fix=str(raw.get("suggested_fix", "")),
-                confidence=min(1.0, max(0.0, float(raw.get("confidence", 0.85)))),
+                confidence=min(1.0, max(0.0, float(confidence_val))),
             )
         except Exception as e:
             print(f"[Agent] _build_bug error: {e} | raw={raw}")

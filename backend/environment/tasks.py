@@ -75,10 +75,14 @@ def cosine_similarity(a: List[float], b: List[float]) -> float:
     return float(np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b)))
 
 def semantic_similarity(text1: str, text2: str) -> Optional[float]:
-    # 🔥 FORCE deterministic behavior in evaluation
-    if os.getenv("EVAL_MODE") == "true":
-        return None
-
+    """
+    Calculate semantic similarity between two texts using embeddings.
+    Returns None if embeddings are unavailable.
+    """
+    # REMOVED: The EVAL_MODE check that was causing Phase 2 failures
+    # During OpenEnv validation, embeddings may be unavailable,
+    # but we let it fall back naturally instead of forcing None
+    
     emb1 = get_embedding(text1)
     emb2 = get_embedding(text2)
 
@@ -180,13 +184,13 @@ class BugDetectionGrader(TaskGrader):
         if action.action_type == ActionType.SKIP:
             if not ground_truth:
                 return {
-                    'score': 1.0,
+                    'score': 0.99,  # Use 0.99 instead of 1.0
                     'feedback': "✓ Correct! Code is clean — no bugs to report.",
                     'breakdown': {'detection': 1.0, 'accuracy': 1.0}
                 }
             else:
                 return {
-                    'score': 0.0,
+                    'score': 0.01,  # Use 0.01 instead of 0.0
                     'feedback': f"✗ Wrong! Code has {len(ground_truth)} bug(s) but you skipped.",
                     'breakdown': {'detection': 0.0}
                 }
@@ -218,26 +222,26 @@ class BugDetectionGrader(TaskGrader):
         if expected_has_bugs == has_bug_claimed:
             if expected_has_bugs:
                 return {
-                    'score': 1.0,
+                    'score': 0.99,  # Use 0.99 instead of 1.0
                     'feedback': f"✓ Correct! Found {len(ground_truth)} bug(s) in the code.",
                     'breakdown': {'detection': 1.0, 'accuracy': 1.0}
                 }
             else:
                 return {
-                    'score': 1.0,
+                    'score': 0.99,  # Use 0.99 instead of 1.0
                     'feedback': "✓ Correct! No bugs found in this code.",
                     'breakdown': {'detection': 1.0, 'accuracy': 1.0}
                 }
         else:
             if expected_has_bugs:
                 return {
-                    'score': 0.0,
+                    'score': 0.01,  # Use 0.01 instead of 0.0
                     'feedback': f"✗ Wrong! Code has {len(ground_truth)} bug(s) but you said it's clean.",
                     'breakdown': {'detection': 0.0}
                 }
             else:
                 return {
-                    'score': 0.0,
+                    'score': 0.01,  # Use 0.01 instead of 0.0
                     'feedback': "✗ Wrong! Code is clean but you claimed there's a bug.",
                     'breakdown': {'detection': 0.0}
                 }
@@ -305,9 +309,12 @@ class BugClassificationGrader(TaskGrader):
         # Combined score (50% finding bugs, 50% correct classification)
         f1_score = metrics['f1']
         total_score = (f1_score * 0.5) + (severity_score * 0.5)
+        
+        # Clamp to valid range
+        total_score = max(0.01, min(0.99, total_score))
 
         # Build feedback
-        if total_score == 1.0:
+        if total_score >= 0.98:
             feedback = f"✓ Perfect! Found all {len(ground_truth)} bugs with correct classifications!"
         elif total_score >= 0.8:
             feedback = f"✓ Great! Found {metrics['matches']}/{len(ground_truth)} bugs with mostly correct classifications."
@@ -371,14 +378,14 @@ class FixSuggestionGrader(TaskGrader):
     def _grade_internal(self, ground_truth: List[Bug], action: Action, context: dict) -> Dict:
         if action.action_type != ActionType.SUGGEST_FIX:
             return {
-                'score': 0.0,
+                'score': 0.01,
                 'feedback': f"Wrong action. Use SUGGEST_FIX for this task.",
                 'breakdown': {'action_type': 0.0}
             }
 
         if not action.fix_suggestion:
             return {
-                'score': 0.0,
+                'score': 0.01,
                 'feedback': "No fix suggestion provided.",
                 'breakdown': {'fix_provided': 0.0}
             }
@@ -387,7 +394,7 @@ class FixSuggestionGrader(TaskGrader):
         target_bug = context.get('target_bug')
         if not target_bug:
             return {
-                'score': 0.0,
+                'score': 0.01,
                 'feedback': "No bug specified to fix.",
                 'breakdown': {'target': 0.0}
             }
@@ -397,7 +404,7 @@ class FixSuggestionGrader(TaskGrader):
 
         if not truth_bug:
             return {
-                'score': 0.0,
+                'score': 0.01,
                 'feedback': "No ground truth bug found to grade against.",
                 'breakdown': {'exists': 0.0}
             }
@@ -406,16 +413,17 @@ class FixSuggestionGrader(TaskGrader):
         fix_score = self._grade_fix_quality_enhanced(
             action.fix_suggestion,
             truth_bug.suggested_fix or "",
-            action.explanation
+            action.explanation if hasattr(action, 'explanation') else None
         )
 
         # Check if explanation was provided
-        explanation_score = 0.3 if action.explanation else 0.0
+        explanation_score = 0.3 if (hasattr(action, 'explanation') and action.explanation) else 0.0
 
         total_score = (fix_score * 0.7) + (explanation_score * 0.3)
+        total_score = max(0.01, min(0.99, total_score))
 
         # Build detailed feedback
-        feedback = self._build_feedback(total_score, fix_score, action.fix_suggestion, truth_bug.suggested_fix)
+        feedback = self._build_feedback(total_score, fix_score, action.fix_suggestion, truth_bug.suggested_fix or "")
 
         return {
             'score': total_score,
@@ -458,20 +466,17 @@ class FixSuggestionGrader(TaskGrader):
 
         # ─── 1. SEMANTIC SIMILARITY SCORE (using embeddings) ────────────────
         semantic_score = self._compute_semantic_score(suggestion, expected)
-        self._last_semantic_score = semantic_score
+        self._last_semantic_score = semantic_score if semantic_score is not None else 0.0
 
         # ─── 2. KEYWORD SCORE (fallback if embeddings fail) ─────────────────
-        # Keep keyword matching as fallback for when embeddings are unavailable
         keyword_score = self._compute_keyword_score(suggestion_lower, expected_lower)
         self._last_keyword_score = keyword_score
 
         # Choose primary scoring method (semantic if available, else keyword)
-        if semantic_score is not None:
+        if semantic_score is not None and semantic_score > 0:
             primary_score = semantic_score
-            scoring_method = "semantic"
         else:
             primary_score = keyword_score
-            scoring_method = "keyword"
 
         # ─── 3. LENGTH SCORE ────────────────────────────────────────────────
         length_score = self._compute_length_score(len(suggestion))
@@ -486,7 +491,7 @@ class FixSuggestionGrader(TaskGrader):
             (syntax_score * self.SYNTAX_WEIGHT)
         )
 
-        return min(total, 1.0)
+        return max(0.01, min(0.99, total))
 
     def _compute_semantic_score(self, suggestion: str, expected: str) -> Optional[float]:
         """
@@ -501,10 +506,10 @@ class FixSuggestionGrader(TaskGrader):
 
             # Convert similarity to score based on thresholds
             if similarity >= self.SIM_EXCELLENT:
-                return 1.0
+                return 0.99
             elif similarity >= self.SIM_GOOD:
-                # Linear interpolation between 0.7 and 1.0
-                return 0.7 + (similarity - self.SIM_GOOD) / (self.SIM_EXCELLENT - self.SIM_GOOD) * 0.3
+                # Linear interpolation between 0.7 and 0.99
+                return 0.7 + (similarity - self.SIM_GOOD) / (self.SIM_EXCELLENT - self.SIM_GOOD) * 0.29
             elif similarity >= self.SIM_DECENT:
                 # Linear interpolation between 0.5 and 0.7
                 return 0.5 + (similarity - self.SIM_DECENT) / (self.SIM_GOOD - self.SIM_DECENT) * 0.2
@@ -513,7 +518,7 @@ class FixSuggestionGrader(TaskGrader):
                 return 0.2 + (similarity - self.SIM_POOR) / (self.SIM_DECENT - self.SIM_POOR) * 0.3
             else:
                 # Very low similarity
-                return max(0.0, similarity * 0.5)  # Cap at 0.5 * similarity
+                return max(0.01, similarity * 0.5)
 
         except Exception as e:
             print(f"[Semantic Scoring Error] {e}")
@@ -535,11 +540,10 @@ class FixSuggestionGrader(TaskGrader):
         keyword_matches = sum(1 for kw in keywords if kw.lower() in suggestion)
         keyword_score = keyword_matches / len(keywords)
 
-        # Bonus for synonym detection (simple word2vec alternative)
-        # Check for common synonym pairs
+        # Bonus for synonym detection
         synonym_bonus = self._check_synonyms(suggestion, expected)
 
-        return min(keyword_score + synonym_bonus, 1.0)
+        return min(0.99, keyword_score + synonym_bonus)
 
     def _check_synonyms(self, suggestion: str, expected: str) -> float:
         """Simple synonym detection for common programming terms."""
@@ -629,17 +633,16 @@ class FixSuggestionGraderLegacy(TaskGrader):
     """
 
     def grade(self, ground_truth: List[Bug], action: Action, context: dict) -> Dict:
-        # Same as original implementation
         if action.action_type != ActionType.SUGGEST_FIX:
             return {
-                'score': 0.0,
+                'score': 0.01,
                 'feedback': f"Wrong action. Use SUGGEST_FIX for this task.",
                 'breakdown': {'action_type': 0.0}
             }
 
         if not action.fix_suggestion:
             return {
-                'score': 0.0,
+                'score': 0.01,
                 'feedback': "No fix suggestion provided.",
                 'breakdown': {'fix_provided': 0.0}
             }
@@ -647,7 +650,7 @@ class FixSuggestionGraderLegacy(TaskGrader):
         target_bug = context.get('target_bug')
         if not target_bug:
             return {
-                'score': 0.0,
+                'score': 0.01,
                 'feedback': "No bug specified to fix.",
                 'breakdown': {'target': 0.0}
             }
@@ -664,7 +667,7 @@ class FixSuggestionGraderLegacy(TaskGrader):
 
         if not truth_bug:
             return {
-                'score': 0.0,
+                'score': 0.01,
                 'feedback': "No ground truth bug found to grade against.",
                 'breakdown': {'exists': 0.0}
             }
@@ -673,11 +676,12 @@ class FixSuggestionGraderLegacy(TaskGrader):
         fix_score = self._grade_fix_quality_legacy(
             action.fix_suggestion,
             truth_bug.suggested_fix or "",
-            action.explanation
+            action.explanation if hasattr(action, 'explanation') else None
         )
 
-        explanation_score = 0.3 if action.explanation else 0.0
+        explanation_score = 0.3 if (hasattr(action, 'explanation') and action.explanation) else 0.0
         total_score = (fix_score * 0.7) + (explanation_score * 0.3)
+        total_score = max(0.01, min(0.99, total_score))
 
         if total_score >= 0.9:
             feedback = f"✓ Excellent fix suggestion! Clean and well-explained."
@@ -728,4 +732,4 @@ class FixSuggestionGraderLegacy(TaskGrader):
                 explanation_score = 0.2
 
         total = (keyword_score * 0.5) + (length_score * 0.2) + (syntax_score * 0.2) + (explanation_score * 0.1)
-        return min(total, 1.0)
+        return max(0.01, min(0.99, total))

@@ -1,7 +1,6 @@
 import os
 import sys
-import asyncio
-from typing import List
+from typing import List, Optional
 
 # Ensure backend import works
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'backend'))
@@ -17,41 +16,78 @@ API_BASE_URL = os.getenv("API_BASE_URL", "https://router.huggingface.co/v1")
 HF_TOKEN = os.getenv("HF_TOKEN")
 
 MAX_STEPS = 8
-SUCCESS_THRESHOLD = 0.3  # adjust if needed
+SUCCESS_THRESHOLD = 0.3
 
+# Suppress all debug output
+os.environ["EVAL_MODE"] = "true"
+
+# Redirect stdout to capture only our logs
+import sys as sys_module
+
+class OutputFilter:
+    """Filter out debug prints, only allow OpenEnv format"""
+    def __init__(self):
+        self.stdout = sys_module.__stdout__
+        
+    def write(self, text):
+        # Only allow [START], [STEP], [END] lines through
+        if text.startswith(('[START]', '[STEP]', '[END]')):
+            self.stdout.write(text)
+            self.stdout.flush()
+        # Ignore all other prints (like [Agent] debug)
+    
+    def flush(self):
+        self.stdout.flush()
+
+# Uncomment to filter debug output (optional)
+# sys_module.stdout = OutputFilter()
 
 # ===== LOGGING FUNCTIONS =====
 def log_start():
     print(f"[START] task={TASK_NAME} env={BENCHMARK} model={MODEL_NAME}", flush=True)
 
-
-def log_step(step: int, action: str, reward: float, done: bool):
-    print(
-        f"[STEP] step={step} action={action} reward={reward:.2f} done={str(done).lower()} error=null",
-        flush=True,
-    )
-
+def log_step(step: int, action: str, reward: float, done: bool, error: Optional[str] = None):
+    error_str = error if error else "null"
+    done_str = str(done).lower()
+    print(f"[STEP] step={step} action={action} reward={reward:.2f} done={done_str} error={error_str}", flush=True)
 
 def log_end(success: bool, steps: int, score: float, rewards: List[float]):
     rewards_str = ",".join(f"{r:.2f}" for r in rewards)
-    print(
-        f"[END] success={str(success).lower()} steps={steps} score={score:.2f} rewards={rewards_str}",
-        flush=True,
-    )
+    print(f"[END] success={str(success).lower()} steps={steps} score={score:.3f} rewards={rewards_str}", flush=True)
 
+# ===== SILENT AGENT WRAPPER =====
+class SilentAgent:
+    """Wrapper that suppresses agent debug output"""
+    def __init__(self):
+        self.agent = CodeReviewAgent()
+        
+    def act(self, observation):
+        # Suppress prints temporarily
+        original_stdout = sys.stdout
+        sys.stdout = open(os.devnull, 'w')
+        try:
+            action = self.agent.act(observation)
+        finally:
+            sys.stdout.close()
+            sys.stdout = original_stdout
+        return action
 
 # ===== MAIN =====
 def main():
-    # Enforce deterministic mode
     success = False
     final_score = 0.0
-    os.environ["EVAL_MODE"] = "true"
-
-    env = CodeReviewEnvironment(use_dynamic_snippets=False)
-    agent = CodeReviewAgent()
-
     rewards = []
     steps_taken = 0
+
+    # Disable agent debug prints
+    original_stdout = sys.stdout
+    sys.stdout = open(os.devnull, 'w')
+    try:
+        env = CodeReviewEnvironment(use_dynamic_snippets=False)
+        agent = CodeReviewAgent()
+    finally:
+        sys.stdout.close()
+        sys.stdout = original_stdout
 
     log_start()
 
@@ -63,7 +99,13 @@ def main():
             if done:
                 break
 
-            action = agent.act(obs)
+            # Suppress agent prints during action
+            sys.stdout = open(os.devnull, 'w')
+            try:
+                action = agent.act(obs)
+            finally:
+                sys.stdout.close()
+                sys.stdout = original_stdout
 
             obs, reward, done, info = env.step(action)
 
@@ -77,13 +119,10 @@ def main():
 
         # Normalize score
         final_score = sum(rewards) / len(rewards) if rewards else 0.0
-        # CRITICAL: Score must be strictly within (0, 1) for Phase 2 compliance
         final_score = max(0.01, min(0.99, final_score))
-
         success = final_score >= SUCCESS_THRESHOLD
 
     except Exception as e:
-        # Even on crash, must output END
         log_end(False, steps_taken, 0.0, rewards)
         raise e
 
@@ -92,9 +131,7 @@ def main():
             env.close()
         except:
             pass
-
         log_end(success, steps_taken, final_score, rewards)
-
 
 if __name__ == "__main__":
     main()
