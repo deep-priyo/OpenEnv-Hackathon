@@ -5,7 +5,7 @@ Enhanced with semantic embedding scoring for fix suggestions
 """
 
 from typing import Dict, List, Set, Optional
-from models import Bug, BugType, Severity, Action, ActionType, Reward
+from .models import Bug, BugType, Severity, Action, ActionType, Reward
 import re
 import os
 import numpy as np
