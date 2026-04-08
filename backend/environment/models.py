@@ -101,9 +101,9 @@ class Reward(BaseModel):
     score: float = Field(ge=0.0, le=1.0)
     breakdown: Dict[str, float]
     feedback: str
-    bugs_correctly_found: int = 0
-    bugs_missed: int = 0
-    false_positives: int = 0
+    bugs_correctly_found: float = 0.0
+    bugs_missed: float = 0.0
+    false_positives: float = 0.0
 
 class EnvironmentState(BaseModel):
     current_task: int
