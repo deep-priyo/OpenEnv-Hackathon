@@ -14,9 +14,51 @@ from environment import CodeReviewEnvironment, Action
 api = Blueprint('api', __name__)
 
 # Single environment instance (stateful per server session)
-# In production, use session-scoped envs or a proper env manager
 use_dynamic = os.getenv("EVAL_MODE") != "true"
 env = CodeReviewEnvironment(use_dynamic_snippets=use_dynamic)
+
+
+@api.route('/metadata', methods=['GET'])
+def metadata():
+    """
+    OpenEnv Phase 2 compliance: must expose all tasks with grader + grader_module fields.
+    The validator checks for at least 3 tasks with these fields present.
+    """
+    return jsonify({
+        'name': 'code-review-environment',
+        'version': '2.0.0',
+        'description': 'OpenEnv RL environment for AI code review agents',
+        'tasks': [
+            {
+                'id': 1,
+                'name': 'Bug Detection',
+                'difficulty': 'easy',
+                'max_steps': 3,
+                'description': 'Detect whether this code has a bug. Use DETECT_BUG or SKIP.',
+                'grader': 'BugDetectionGrader',
+                'grader_module': 'backend.environment.tasks'
+            },
+            {
+                'id': 2,
+                'name': 'Bug Classification',
+                'difficulty': 'medium',
+                'max_steps': 6,
+                'description': 'Find ALL bugs and classify their type and severity correctly.',
+                'grader': 'BugClassificationGrader',
+                'grader_module': 'backend.environment.tasks'
+            },
+            {
+                'id': 3,
+                'name': 'Fix Suggestion',
+                'difficulty': 'hard',
+                'max_steps': 4,
+                'description': 'Suggest a detailed fix for the identified bug.',
+                'grader': 'FixSuggestionGrader',
+                'grader_module': 'backend.environment.tasks'
+            }
+        ]
+    })
+
 
 @api.route('/reset', methods=['POST'])
 def reset():
@@ -38,7 +80,7 @@ def step():
         data = request.json
         if not data:
             return jsonify({'success': False, 'error': 'Empty request body'}), 400
-        
+
         try:
             action = Action(**data)
         except Exception as e:

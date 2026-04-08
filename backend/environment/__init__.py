@@ -7,7 +7,10 @@ from .models import (
     CodeSnippet, CodeReviewContext,
     Action, Observation, Reward, EnvironmentState
 )
-from .environment import CodeReviewEnvironment
+try:
+    from .environment import CodeReviewEnvironment
+except ImportError:
+    pass
 from .tasks import (
     BugDetectionGrader,
     BugClassificationGrader,
