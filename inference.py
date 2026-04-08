@@ -77,7 +77,8 @@ def main():
 
         # Normalize score
         final_score = sum(rewards) / len(rewards) if rewards else 0.0
-        final_score = max(0.0, min(1.0, final_score))
+        # CRITICAL: Score must be strictly within (0, 1) for Phase 2 compliance
+        final_score = max(0.01, min(0.99, final_score))
 
         success = final_score >= SUCCESS_THRESHOLD
 

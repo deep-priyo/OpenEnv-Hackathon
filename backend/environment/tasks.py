@@ -141,6 +141,12 @@ class BugDetectionGrader(TaskGrader):
     """
 
     def grade(self, ground_truth: List[Bug], action: Action, context: dict) -> Dict:
+        res = self._grade_internal(ground_truth, action, context)
+        # Ensure score is strictly between 0 and 1 for OpenEnv Phase 2 compliance
+        res['score'] = max(0.01, min(0.99, res['score']))
+        return res
+
+    def _grade_internal(self, ground_truth: List[Bug], action: Action, context: dict) -> Dict:
         expected_has_bugs = len(ground_truth) > 0
 
         # SKIP is valid if code is clean; penalised if bugs exist
@@ -220,6 +226,12 @@ class BugClassificationGrader(TaskGrader):
     """
 
     def grade(self, ground_truth: List[Bug], action: Action, context: dict) -> Dict:
+        res = self._grade_internal(ground_truth, action, context)
+        # Ensure score is strictly between 0 and 1 for OpenEnv Phase 2 compliance
+        res['score'] = max(0.01, min(0.99, res['score']))
+        return res
+
+    def _grade_internal(self, ground_truth: List[Bug], action: Action, context: dict) -> Dict:
         # Get all bugs found so far from context
         found_bugs = context.get('bugs_found', [])
 
@@ -309,6 +321,12 @@ class FixSuggestionGrader(TaskGrader):
     SIM_POOR = 0.30        # Poor match, some relation
 
     def grade(self, ground_truth: List[Bug], action: Action, context: dict) -> Dict:
+        res = self._grade_internal(ground_truth, action, context)
+        # Ensure score is strictly between 0 and 1 for OpenEnv Phase 2 compliance
+        res['score'] = max(0.01, min(0.99, res['score']))
+        return res
+
+    def _grade_internal(self, ground_truth: List[Bug], action: Action, context: dict) -> Dict:
         if action.action_type != ActionType.SUGGEST_FIX:
             return {
                 'score': 0.0,

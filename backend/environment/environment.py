@@ -222,13 +222,14 @@ class CodeReviewEnvironment:
                 confidence_bonus = -0.05
 
         # Apply all penalties and bonuses
-        shaped_score = max(0.0, min(1.0, base_score - step_penalty - false_positive_penalty + confidence_bonus))
+        shaped_score = max(0.01, min(0.99, base_score - step_penalty - false_positive_penalty + confidence_bonus))
 
         # Track rewards
         self.episode_rewards.append(shaped_score)
 
-        # Running average total score
-        self.total_score = sum(self.episode_rewards) / len(self.episode_rewards)
+        # Normalize score
+        # Using a slight floor/ceiling here too for the running total
+        self.total_score = max(0.01, min(0.99, sum(self.episode_rewards) / len(self.episode_rewards)))
 
         # Build Reward object
         reward = Reward(
@@ -360,6 +361,11 @@ class CodeReviewEnvironment:
                 a.action_type in (ActionType.DETECT_BUG, ActionType.SKIP)
                 for a in self.actions_taken
             )
+
+            # Ensure Task 1 is not TOO fast if we want to hit 3 tasks in 8 steps
+            # but usually Task 1 is 1-2 steps, Task 2 is 2-5 steps, Task 3 is 1-3 steps.
+            # Total steps for 3 tasks: ~4-10 steps.
+            # 8 steps is enough for 3 tasks if the agent is efficient.
 
             if not has_acted:
                 return False
