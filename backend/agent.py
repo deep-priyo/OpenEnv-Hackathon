@@ -31,6 +31,15 @@ BUG_TYPE_ALIASES = {
     "sec": "security",
     "doc": "documentation",
     "style_issue": "style",
+    "vulnerability": "security",
+    "sql_injection": "security",
+    "injection": "security",
+    "optimization": "performance",
+    "speed": "performance",
+    "thread_safe": "race_condition",
+    "concurrency": "race_condition",
+    "leak": "memory_leak",
+    "deadlock": "race_condition",
 }
 
 # ─── Prompts ──────────────────────────────────────────────────────────────────
