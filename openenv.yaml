@@ -14,13 +14,13 @@ license: MIT
 
 # ─── Environment Metadata ────────────────────────────────────────────────────
 
-deterministic: true  # CRITICAL: OpenEnv requires this for Phase 2
+deterministic: true
 
 environment:
   class: CodeReviewEnvironment
-  module: backend.environment  # Path to your environment class
+  module: backend.environment  # ✅ Correct - points to backend/environment/
   init_args:
-    use_dynamic_snippets: false  # Disable for deterministic validation
+    use_dynamic_snippets: false
 
 # ─── Tasks (MUST have exactly 3 with graders) ────────────────────────────────
 
@@ -31,7 +31,7 @@ tasks:
     max_steps: 3
     description: "Binary classification: does this code contain a bug?"
     grader: BugDetectionGrader
-    grader_module: backend.tasks  # CRITICAL: Path to grader class
+    grader_module: backend.environment.tasks  # ✅ FIXED - points to backend/environment/tasks.py
     
   - id: 2
     name: Bug Classification
@@ -39,7 +39,7 @@ tasks:
     max_steps: 6
     description: "Find ALL bugs and classify their type and severity correctly"
     grader: BugClassificationGrader
-    grader_module: backend.tasks  # CRITICAL: Path to grader class
+    grader_module: backend.environment.tasks  # ✅ FIXED
     
   - id: 3
     name: Fix Suggestion
@@ -47,7 +47,7 @@ tasks:
     max_steps: 4
     description: "Suggest a detailed, correct fix for the identified bug"
     grader: FixSuggestionGrader
-    grader_module: backend.tasks  # CRITICAL: Path to grader class
+    grader_module: backend.environment.tasks  # ✅ FIXED
 
 # ─── API Configuration ───────────────────────────────────────────────────────
 
