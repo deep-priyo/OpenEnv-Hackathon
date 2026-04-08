@@ -1,72 +1,36 @@
-# openenv.yaml
-# OpenEnv Compliance Manifest
-# Required for hackathon submission
-
 name: code-review-environment
 version: "2.0.0"
-description: >
-  A reinforcement learning environment where AI agents learn to review code.
-  Agents progress through 3 tasks of increasing difficulty: bug detection (easy),
-  bug classification (medium), and fix suggestion (hard).
-
-author: "hackathon-team"
-license: MIT
-
-# ─── Environment Metadata ────────────────────────────────────────────────────
+description: Code review environment with 3 progressive tasks
 
 deterministic: true
 
 environment:
   class: CodeReviewEnvironment
-  module: backend.environment  # ✅ Correct - points to backend/environment/
+  module: backend.environment  # ✅ Points to backend/environment/
   init_args:
     use_dynamic_snippets: false
-
-# ─── Tasks (MUST have exactly 3 with graders) ────────────────────────────────
 
 tasks:
   - id: 1
     name: Bug Detection
     difficulty: easy
     max_steps: 3
-    description: "Binary classification: does this code contain a bug?"
     grader: BugDetectionGrader
-    grader_module: backend.environment.tasks  # ✅ FIXED - points to backend/environment/tasks.py
+    grader_module: backend.environment.tasks  # ✅ MUST be this path
     
   - id: 2
     name: Bug Classification
     difficulty: medium
     max_steps: 6
-    description: "Find ALL bugs and classify their type and severity correctly"
     grader: BugClassificationGrader
-    grader_module: backend.environment.tasks  # ✅ FIXED
+    grader_module: backend.environment.tasks  # ✅ MUST be this path
     
   - id: 3
     name: Fix Suggestion
     difficulty: hard
     max_steps: 4
-    description: "Suggest a detailed, correct fix for the identified bug"
     grader: FixSuggestionGrader
-    grader_module: backend.environment.tasks  # ✅ FIXED
-
-# ─── API Configuration ───────────────────────────────────────────────────────
+    grader_module: backend.environment.tasks  # ✅ MUST be this path
 
 api:
   port: 7860
-  endpoints:
-    reset: /reset
-    step: /step
-    state: /state
-    health: /health
-    metadata: /metadata
-
-# ─── Validation ──────────────────────────────────────────────────────────────
-
-validation:
-  max_steps_per_episode: 15
-  success_threshold: 0.3
-  required_endpoints:
-    - /reset
-    - /step
-    - /state
-    - /health
