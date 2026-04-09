@@ -1,0 +1,13 @@
+services:
+  app:
+    build: .
+    ports:
+      - "7860:7860"
+    environment:
+      - PORT=7860
+      - EVAL_MODE=true
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - API_BASE_URL=${API_BASE_URL:-https://router.huggingface.co/v1}
+      - MODEL_NAME=${MODEL_NAME:-gpt-4o-mini}
+      - HF_TOKEN=${HF_TOKEN}
+    restart: unless-stopped
