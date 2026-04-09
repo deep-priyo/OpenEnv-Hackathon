@@ -1,106 +1,69 @@
 name: code-review-environment
 version: 2.0.0
-description: >
-  An OpenEnv RL environment for AI code review agents. Agents must detect bugs,
-  classify their type and severity, and suggest fixes across three progressive tasks.
+description: OpenEnv RL environment for AI code review agents
 
-author: deep-priyo
-repository: https://github.com/deep-priyo/OpenEnv-Hackathon
-space: https://huggingface.co/spaces/deep-piryo/openenv-hackathon
-
-# Runtime entrypoint
-entrypoint: backend.app
-port: 7860
-
-# API endpoints
-endpoints:
-  reset: POST /reset
-  step: POST /step
-  state: GET /state
-  metadata: GET /metadata
-  health: GET /health
-
-# Environment configuration
 environment:
-  max_episode_steps: 8
-  reward_range: [0.01, 0.99]
-  observation_space: CodeReviewContext
-  action_space: Action
+  class: CodeReviewEnvironment
+  module: backend
+  endpoints:
+    reset: POST /reset
+    step: POST /step
+    state: GET /state
+    health: GET /health
 
 tasks:
   - id: 1
     name: Bug Detection
     difficulty: easy
+    description: Detect whether this code has a bug. Use detect_bug if you find one, or skip if code is clean.
+    grader:
+      class: BugDetectionGrader
+      module: backend.environment.tasks
+    reward_range: [0.0, 1.0]
     max_steps: 3
-    description: >
-      Detect whether the given code snippet contains a bug.
-      Use DETECT_BUG action if a bug is found, or SKIP if the code is clean.
-    grader: BugDetectionGrader
-    grader_module: backend.environment.tasks
 
   - id: 2
     name: Bug Classification
     difficulty: medium
+    description: Find ALL bugs and classify their type and severity correctly.
+    grader:
+      class: BugClassificationGrader
+      module: backend.environment.tasks
+    reward_range: [0.0, 1.0]
     max_steps: 6
-    description: >
-      Find ALL bugs in the code snippet and classify each by type (security,
-      logic, performance, etc.) and severity (critical, high, medium, low).
-      Use repeated DETECT_BUG actions — one per bug found.
-    grader: BugClassificationGrader
-    grader_module: backend.environment.tasks
 
   - id: 3
     name: Fix Suggestion
     difficulty: hard
+    description: Suggest a detailed fix for the bug with explanation.
+    grader:
+      class: FixSuggestionGrader
+      module: backend.environment.tasks
+    reward_range: [0.0, 1.0]
     max_steps: 4
-    description: >
-      Identify the complex architectural bug in the code and suggest a detailed,
-      correct fix. Use SUGGEST_FIX action with fix_suggestion and explanation fields.
-    grader: FixSuggestionGrader
-    grader_module: backend.environment.tasks
 
-# Grader implementations
-graders:
-  BugDetectionGrader:
-    module: backend.environment.tasks
-    class: BugDetectionGrader
-    description: >
-      Binary grader — scores 1.0 if the agent correctly identifies whether a bug
-      exists. Partial credit (0.5) if the bug is found but misclassified.
+observation_space:
+  current_task: int
+  task_description: str
+  code: str
+  filename: str
+  step_count: int
+  max_steps: int
+  total_bugs: int
+  bugs_found_so_far: int
 
-  BugClassificationGrader:
-    module: backend.environment.tasks
-    class: BugClassificationGrader
-    description: >
-      Multi-label grader — scores based on F1 of bugs found vs expected,
-      weighted with severity accuracy. Supports partial credit for near-matches.
+action_space:
+  action_type:
+    type: enum
+    values: [detect_bug, classify_severity, suggest_fix, review, explain, skip]
+  confidence:
+    type: float
+    range: [0.0, 1.0]
+  explanation:
+    type: str
 
-  FixSuggestionGrader:
-    module: backend.environment.tasks
-    class: FixSuggestionGrader
-    description: >
-      Fix quality grader — scores based on semantic similarity (embedding-based)
-      of the suggested fix vs ground truth, plus length and syntax quality bonuses.
-
-# Reward shaping
-reward:
-  shape: shaped
-  step_penalty: -0.05
-  confidence_bonus: true
-  clamp: [0.01, 0.99]
-
-# Dependencies
-dependencies:
-  python: ">=3.11"
-  packages:
-    - flask
-    - flask-cors
-    - pydantic
-    - openai
-    - numpy
-
-# Docker
-docker:
-  base_image: python:3.11-slim
-  port: 7860
-  health_check: GET /health
+inference:
+  script: inference.py
+  model_env: MODEL_NAME
+  api_base_env: API_BASE_URL
+  token_env: HF_TOKEN
