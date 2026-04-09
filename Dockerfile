@@ -36,4 +36,4 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=5 \
     CMD curl -f http://localhost:7860/health || exit 1
 
 # Run the Flask app directly (simplest and most reliable)
-CMD ["python", "backend/app.py"]
+CMD ["python", "inference.py"]
