@@ -161,6 +161,16 @@ class TaskGrader:
             'matches': total_matches
         }
 
+def bug_detection_grader(observation, action, info):
+    return BugDetectionGrader().grade(observation, action, info)
+
+
+def bug_classification_grader(observation, action, info):
+    return BugClassificationGrader().grade(observation, action, info)
+
+
+def fix_suggestion_grader(observation, action, info):
+    return FixSuggestionGrader().grade(observation, action, info)
 
 # ============ Task 1: Bug Detection (Easy) ============
 

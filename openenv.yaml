@@ -28,36 +28,58 @@ environment:
   action_space: Action
 
 tasks:
+#  - id: 1
+#    name: Bug Detection
+#    difficulty: easy
+#    max_steps: 3
+#    description: >
+#      Detect whether the given code snippet contains a bug.
+#      Use DETECT_BUG action if a bug is found, or SKIP if the code is clean.
+#    grader: BugDetectionGrader
+#    grader_module: backend.environment.tasks
   - id: 1
     name: Bug Detection
     difficulty: easy
     max_steps: 3
-    description: >
-      Detect whether the given code snippet contains a bug.
-      Use DETECT_BUG action if a bug is found, or SKIP if the code is clean.
-    grader: BugDetectionGrader
-    grader_module: backend.environment.tasks
+    description: Detect whether the given code snippet contains a bug.
+    grader:
+      fn: "backend.environment.tasks.BugDetectionGrader"
 
+#  - id: 2
+#    name: Bug Classification
+#    difficulty: medium
+#    max_steps: 6
+#    description: >
+#      Find ALL bugs in the code snippet and classify each by type (security,
+#      logic, performance, etc.) and severity (critical, high, medium, low).
+#      Use repeated DETECT_BUG actions — one per bug found.
+#    grader: BugClassificationGrader
+#    grader_module: backend.environment.tasks
+#
+#  - id: 3
+#    name: Fix Suggestion
+#    difficulty: hard
+#    max_steps: 4
+#    description: >
+#      Identify the complex architectural bug in the code and suggest a detailed,
+#      correct fix. Use SUGGEST_FIX action with fix_suggestion and explanation fields.
+#    grader: FixSuggestionGrader
+#    grader_module: backend.environment.tasks
   - id: 2
     name: Bug Classification
     difficulty: medium
     max_steps: 6
-    description: >
-      Find ALL bugs in the code snippet and classify each by type (security,
-      logic, performance, etc.) and severity (critical, high, medium, low).
-      Use repeated DETECT_BUG actions — one per bug found.
-    grader: BugClassificationGrader
-    grader_module: backend.environment.tasks
+    description: Find ALL bugs and classify them.
+    grader:
+      fn: "backend.environment.tasks.BugClassificationGrader"
 
   - id: 3
     name: Fix Suggestion
     difficulty: hard
     max_steps: 4
-    description: >
-      Identify the complex architectural bug in the code and suggest a detailed,
-      correct fix. Use SUGGEST_FIX action with fix_suggestion and explanation fields.
-    grader: FixSuggestionGrader
-    grader_module: backend.environment.tasks
+    description: Suggest a correct fix.
+    grader:
+      fn: "backend.environment.tasks.FixSuggestionGrader"
 
 # Grader implementations
 graders:
