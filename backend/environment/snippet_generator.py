@@ -16,8 +16,8 @@ import random
 from openai import OpenAI
 from typing import List, Optional, Dict
 from .models import Bug, BugType, Severity, CodeSnippet
-from dotenv import loadenv
-loadenv()
+from dotenv import load_dotenv
+load_dotenv()
 
 SCENARIOS = [
     "user authentication", "database query", "file upload handler",

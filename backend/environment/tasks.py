@@ -9,8 +9,8 @@ from .models import Bug, BugType, Severity, Action, ActionType, Reward
 import re
 import os
 import numpy as np
-from dotenv import loadenv
-loadenv()
+from dotenv import load_dotenv
+load_dotenv()
 # Try importing OpenAI for embeddings
 try:
     from openai import OpenAI

@@ -6,6 +6,8 @@ from flask import Flask, jsonify, request
 from flask_cors import CORS
 import os
 import sys
+from dotenv import load_dotenv
+load_dotenv()
 
 # Ensure /app is on the path so 'backend' resolves correctly
 current_dir = os.path.dirname(os.path.abspath(__file__))

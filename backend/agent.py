@@ -15,7 +15,8 @@ import os
 import sys
 from openai import OpenAI
 from typing import Dict, List, Optional, Set, Tuple
-
+from dotenv import load_dotenv
+load_dotenv()
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from environment.models import Action, ActionType, Bug, BugType, Severity
 

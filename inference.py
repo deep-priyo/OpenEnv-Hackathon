@@ -1,6 +1,8 @@
 import os
 import sys
 from typing import List, Optional
+from dotenv import load_dotenv
+load_dotenv()
 
 # Ensure backend import works
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'backend'))
