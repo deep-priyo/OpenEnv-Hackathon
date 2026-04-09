@@ -9,7 +9,8 @@ from .models import Bug, BugType, Severity, Action, ActionType, Reward
 import re
 import os
 import numpy as np
-
+from dotenv import loadenv
+loadenv()
 # Try importing OpenAI for embeddings
 try:
     from openai import OpenAI
@@ -26,7 +27,7 @@ def _get_openai_client():
     """Lazy initialization of OpenAI client"""
     global _openai_client
     if _openai_client is None and OPENAI_AVAILABLE:
-        api_key = os.getenv("OPENAI_API_KEY") or os.getenv("OPENAI_KEY")
+        api_key = os.getenv("OPENAI_API_KEY")
         if api_key:
             _openai_client = OpenAI(api_key=api_key)
         else:
