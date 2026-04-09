@@ -13,11 +13,11 @@ import numpy as np
 # Try importing OpenAI for embeddings
 try:
     from openai import OpenAI
-    OPENAI_AVAILABLE = True
+    OPENAI_AVAILABLE = True     
 except ImportError:
     OPENAI_AVAILABLE = False
     print("[Warning] OpenAI not installed. Embedding scoring disabled. Falling back to keyword matching.")
-
+    
 # ─── Embedding cache for performance ──────────────────────────────────────────
 _embedding_cache = {}
 _openai_client = None

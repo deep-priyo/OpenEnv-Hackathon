@@ -1,3 +1,4 @@
+# backend/api_routes.py
 """
 Flask API Routes — REST endpoints for frontend/agent integration
 """
@@ -7,147 +8,75 @@ import sys
 import os
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, current_dir)
+app_root = os.path.dirname(current_dir)
+if app_root not in sys.path:
+    sys.path.insert(0, app_root)
 
-from environment import CodeReviewEnvironment, Action
+from backend.environment import CodeReviewEnvironment
+from backend.environment.models import Action, ActionType, Bug, BugType, Severity
 
 api = Blueprint('api', __name__)
 
-# Single environment instance (stateful per server session)
-use_dynamic = os.getenv("EVAL_MODE") != "true"
-env = CodeReviewEnvironment(use_dynamic_snippets=use_dynamic)
-
-
-@api.route('/metadata', methods=['GET'])
-def metadata():
-    """
-    OpenEnv Phase 2 compliance: must expose all tasks with grader + grader_module fields.
-    The validator checks for at least 3 tasks with these fields present.
-    """
-    return jsonify({
-        'name': 'code-review-environment',
-        'version': '2.0.0',
-        'description': 'OpenEnv RL environment for AI code review agents',
-        'tasks': [
-            {
-                'id': 1,
-                'name': 'Bug Detection',
-                'difficulty': 'easy',
-                'max_steps': 3,
-                'description': 'Detect whether this code has a bug. Use DETECT_BUG or SKIP.',
-                'grader': 'BugDetectionGrader',
-                'grader_module': 'backend.environment.tasks'
-            },
-            {
-                'id': 2,
-                'name': 'Bug Classification',
-                'difficulty': 'medium',
-                'max_steps': 6,
-                'description': 'Find ALL bugs and classify their type and severity correctly.',
-                'grader': 'BugClassificationGrader',
-                'grader_module': 'backend.environment.tasks'
-            },
-            {
-                'id': 3,
-                'name': 'Fix Suggestion',
-                'difficulty': 'hard',
-                'max_steps': 4,
-                'description': 'Suggest a detailed fix for the identified bug.',
-                'grader': 'FixSuggestionGrader',
-                'grader_module': 'backend.environment.tasks'
-            }
-        ]
-    })
-
+# Use the same environment instance (will be shared)
+# Note: This might create a second instance. Consider using a singleton pattern.
+env = CodeReviewEnvironment(use_dynamic_snippets=False)
 
 @api.route('/reset', methods=['POST'])
-def reset():
+def api_reset():
+    """Reset via API blueprint (for frontend compatibility)"""
     try:
-        observation = env.reset()
+        obs = env.reset()
         return jsonify({
             'success': True,
-            'observation': _serialize_obs(observation),
-            'available_actions': observation.available_actions
+            'observation': {
+                'task_id': obs.current_task,
+                'task_description': obs.task_description,
+                'code': obs.code_context.code.code
+            }
         })
     except Exception as e:
-        import traceback; traceback.print_exc()
         return jsonify({'success': False, 'error': str(e)}), 500
 
-
 @api.route('/step', methods=['POST'])
-def step():
+def api_step():
+    """Step via API blueprint (for frontend compatibility)"""
     try:
         data = request.json
         if not data:
             return jsonify({'success': False, 'error': 'Empty request body'}), 400
-
-        try:
-            action = Action(**data)
-        except Exception as e:
-            return jsonify({'success': False, 'error': f'Invalid action format: {str(e)}'}), 400
-
-        observation, reward, done, info = env.step(action)
+        
+        action_type = ActionType(data.get('action_type', 'skip'))
+        action = Action(action_type=action_type, confidence=data.get('confidence', 0.8))
+        
+        obs, reward, done, info = env.step(action)
+        
         return jsonify({
             'success': True,
-            'observation': _serialize_obs(observation),
-            'reward': {
-                'score': reward.score,
-                'feedback': reward.feedback,
-                'breakdown': reward.breakdown,
-                'bugs_correctly_found': reward.bugs_correctly_found,
-                'bugs_missed': reward.bugs_missed,
-            },
+            'reward': reward.score,
+            'feedback': reward.feedback,
             'done': done,
-            'info': info,
-            'total_score': env.total_score
+            'info': info
         })
     except Exception as e:
-        import traceback; traceback.print_exc()
         return jsonify({'success': False, 'error': str(e)}), 500
 
-
 @api.route('/state', methods=['GET'])
-def get_state():
+def api_state():
+    """Get state via API blueprint"""
     try:
         state = env.state()
         return jsonify({
-            'success': True,
-            'state': {
-                'current_task': state.current_task,
-                'step_count': state.step_count,
-                'total_score': state.total_score,
-                'tasks_completed': state.tasks_completed,
-                'current_code_id': state.current_code_id,
-                'bugs_found': [b.dict() for b in state.bugs_found],
-                'actions_taken': [a.dict() for a in state.actions_taken],
-                'episode_rewards': state.episode_rewards,
-            }
+            'current_task': state.current_task,
+            'step_count': state.step_count,
+            'total_score': state.total_score
         })
     except Exception as e:
-        import traceback; traceback.print_exc()
-        return jsonify({'success': False, 'error': str(e)}), 500
-
+        return jsonify({'error': str(e)}), 500
 
 @api.route('/health', methods=['GET'])
-def health():
+def api_health():
+    """Health check via API blueprint"""
     return jsonify({
         'status': 'healthy',
-        'environment': 'code-review-v2',
-        'current_task': getattr(env, 'current_task', None),
-        'dynamic_snippets': getattr(env, 'use_dynamic', False),
+        'environment': 'code-review-v4'
     })
-
-
-def _serialize_obs(observation) -> dict:
-    return {
-        'task_id': observation.current_task,
-        'task_description': observation.task_description,
-        'code': observation.code_context.code.code,
-        'filename': observation.code_context.code.filename,
-        'language': observation.code_context.code.language,
-        'step_count': observation.step_count,
-        'max_steps': observation.max_steps,
-        'bugs_found_so_far': observation.bugs_found_so_far,
-        'total_bugs': observation.total_bugs,
-        'difficulty': observation.code_context.difficulty,
-    }

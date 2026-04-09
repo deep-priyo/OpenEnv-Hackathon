@@ -3,7 +3,7 @@ FROM python:3.11-slim
 # Set working directory
 WORKDIR /app
 
-# Install system dependencies
+# Install system dependencies including curl for healthcheck
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     curl \
@@ -31,10 +31,9 @@ ENV HF_TOKEN=""
 # Expose port
 EXPOSE 7860
 
-# Healthcheck
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+# Healthcheck - more forgiving during startup
+HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=5 \
     CMD curl -f http://localhost:7860/health || exit 1
 
-# Run the Flask app inside backend/app.py directly
-# PYTHONPATH=/app means 'backend' is a resolvable package
-CMD ["python", "-m", "backend.app"]
+# Run the Flask app directly (simplest and most reliable)
+CMD ["python", "backend/app.py"]
