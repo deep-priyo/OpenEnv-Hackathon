@@ -8,7 +8,7 @@ sdk: docker
 app_file: server/app.py
 pinned: false
 tags: [openenv, rl, code-review, bug-detection, agent-eval]
------------------------------------------------------------
+---
 
 # 💻 CIVERSE — Code Review RL Environment
 
