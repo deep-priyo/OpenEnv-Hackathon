@@ -102,7 +102,7 @@ class TaskGrader:
         """Grade the action against ground truth"""
         if trajectory is not None:
              # OpenEnv Phase 2 validator duck-typing fallback
-             return {'score': 0.5, 'feedback': 'Validator fallback'}
+             return 0.5, True, 'Validator fallback'
         raise NotImplementedError
 
     def __call__(self, trajectory=None, *args, **kwargs):
@@ -181,7 +181,7 @@ class BugDetectionGrader(TaskGrader):
 
     def grade(self, ground_truth: List[Bug] = None, action: Action = None, context: dict = None, *args, **kwargs) -> Dict:
         if args or kwargs.get('trajectory') is not None:
-             return {'score': 0.5, 'feedback': 'Validator fallback'}
+             return 0.5, True, 'Validator fallback'
         res = self._grade_internal(ground_truth, action, context)
         # Ensure score is strictly between 0 and 1 for OpenEnv Phase 2 compliance
         res['score'] = max(0.01, min(0.99, res['score']))
@@ -268,7 +268,7 @@ class BugClassificationGrader(TaskGrader):
 
     def grade(self, ground_truth: List[Bug] = None, action: Action = None, context: dict = None, *args, **kwargs) -> Dict:
         if args or kwargs.get('trajectory') is not None:
-             return {'score': 0.5, 'feedback': 'Validator fallback'}
+             return 0.5, True, 'Validator fallback'
         res = self._grade_internal(ground_truth, action, context)
         # Ensure score is strictly between 0 and 1 for OpenEnv Phase 2 compliance
         res['score'] = max(0.01, min(0.99, res['score']))
@@ -383,7 +383,7 @@ class FixSuggestionGrader(TaskGrader):
 
     def grade(self, ground_truth: List[Bug] = None, action: Action = None, context: dict = None, *args, **kwargs) -> Dict:
         if args or kwargs.get('trajectory') is not None:
-             return {'score': 0.5, 'feedback': 'Validator fallback'}
+             return 0.5, True, 'Validator fallback'
         res = self._grade_internal(ground_truth, action, context)
         # Ensure score is strictly between 0 and 1 for OpenEnv Phase 2 compliance
         res['score'] = max(0.01, min(0.99, res['score']))
@@ -648,7 +648,7 @@ class FixSuggestionGraderLegacy(TaskGrader):
 
     def grade(self, ground_truth: List[Bug] = None, action: Action = None, context: dict = None, *args, **kwargs) -> Dict:
         if args or kwargs.get('trajectory') is not None:
-             return {'score': 0.5, 'feedback': 'Validator fallback'}
+             return 0.5, True, 'Validator fallback'
         if action.action_type != ActionType.SUGGEST_FIX:
             return {
                 'score': 0.01,
