@@ -1,64 +1,79 @@
-name: code-review-environment
-version: 2.0.0
-description: OpenEnv RL environment for AI code review agents
+spec_version: 1
+name: code-review-env
+type: space
+runtime: fastapi
+app: server.app:app
+port: 7860
 
-environment:
-  class: CodeReviewEnvironment
-  module: backend
-  endpoints:
-    reset: POST /reset
-    step: POST /step
-    state: GET /state
-    health: GET /health
-    grade: /grader
+description: >
+  Code Review Environment
+version: "2.0.0"
+author: "CR Team"
+tags: [openenv, code-review]
+
+endpoints:
+  health: /health
+  reset:  /reset
+  step:   /step
+  state:  /state
+  grade:  /grader
+
+action_space:
+  type: discrete
+  actions:
+    - name: detect
+    - name: classify
+    - name: fix
+    - name: skip
+
+observation_space:
+  code: string
+  task_id: string
+  step: int
 
 tasks:
   - id: easy
-    name: Bug Detection
     difficulty: easy
-    description: Detect whether this code has a bug. Use detect_bug if you find one, or skip if code is clean.
-    grader: "grader.civerse_graders:EasyGrader"
-    baseline_score: 0.80
-    reward_range: [0.0, 1.0]
-    max_steps: 3
+    description: 1 bug (e.g., syntax or simple logic)
+    max_steps: 15
+    grader: "grader.code_review_graders:EasyGrader"
+    baseline_score: 0.8
 
   - id: medium
-    name: Bug Classification
     difficulty: medium
-    description: Find ALL bugs and classify their type and severity correctly.
-    grader: "grader.civerse_graders:MediumGrader"
-    baseline_score: 0.50
-    reward_range: [0.0, 1.0]
-    max_steps: 6
+    description: 2-3 bugs (logic + edge cases)
+    max_steps: 15
+    grader: "grader.code_review_graders:MediumGrader"
+    baseline_score: 0.5
 
   - id: hard
-    name: Fix Suggestion
     difficulty: hard
-    description: Suggest a detailed fix for the bug with explanation.
-    grader: "grader.civerse_graders:HardGrader"
-    baseline_score: 0.30
-    reward_range: [0.0, 1.0]
-    max_steps: 4
+    description: 3-5 bugs (security + logic + performance)
+    max_steps: 15
+    grader: "grader.code_review_graders:HardGrader"
+    baseline_score: 0.3
 
-observation_space:
-  current_task: int
-  task_description: str
-  code: str
-  filename: str
-  step_count: int
-  max_steps: int
-  total_bugs: int
-  bugs_found_so_far: int
+  - id: expert
+    difficulty: expert
+    description: 3-5 complex bugs
+    max_steps: 15
+    grader: "grader.code_review_graders:ExpertGrader"
+    baseline_score: 0.2
 
-action_space:
-  action_type:
-    type: enum
-    values: [detect_bug, classify_severity, suggest_fix, review, explain, skip]
-  confidence:
-    type: float
-    range: [0.0, 1.0]
-  explanation:
-    type: str
+scoring:
+  reward_range: [-1.0, 1.0]
+  grader_range: [0.01, 0.99]
+  success_threshold: 0.50
+  score_formula: deterministic_grader
+  components:
+    - detection_accuracy: 0.33
+    - classification_accuracy: 0.33
+    - fix_quality: 0.34
+
+constraints:
+  max_runtime_seconds: 1800
+  max_memory_gb: 8
+  max_vcpu: 2
 
 inference:
   script: "inference.py"
