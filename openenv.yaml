@@ -16,8 +16,7 @@ tasks:
     name: Bug Detection
     difficulty: easy
     description: Detect whether this code has a bug. Use detect_bug if you find one, or skip if code is clean.
-    grader: BugDetectionGrader
-    grader_module: backend.environment.tasks
+    grader: "backend.environment.tasks:BugDetectionGrader"
     reward_range: [0.0, 1.0]
     max_steps: 3
 
@@ -25,8 +24,7 @@ tasks:
     name: Bug Classification
     difficulty: medium
     description: Find ALL bugs and classify their type and severity correctly.
-    grader: BugClassificationGrader
-    grader_module: backend.environment.tasks
+    grader: "backend.environment.tasks:BugClassificationGrader"
     reward_range: [0.0, 1.0]
     max_steps: 6
 
@@ -34,8 +32,7 @@ tasks:
     name: Fix Suggestion
     difficulty: hard
     description: Suggest a detailed fix for the bug with explanation.
-    grader: FixSuggestionGrader
-    grader_module: backend.environment.tasks
+    grader: "backend.environment.tasks:FixSuggestionGrader"
     reward_range: [0.0, 1.0]
     max_steps: 4
 
