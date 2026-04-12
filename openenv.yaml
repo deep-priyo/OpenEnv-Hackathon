@@ -57,7 +57,8 @@ action_space:
     type: str
 
 inference:
-  script: inference.py
-  model_env: MODEL_NAME
-  api_base_env: API_BASE_URL
-  token_env: HF_TOKEN
+  script: "inference.py"
+  env_vars:
+    - API_BASE_URL
+    - MODEL_NAME
+    - HF_TOKEN
