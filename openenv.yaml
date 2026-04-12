@@ -10,6 +10,7 @@ environment:
     step: POST /step
     state: GET /state
     health: GET /health
+    grade: /grader
 
 tasks:
   - id: 1

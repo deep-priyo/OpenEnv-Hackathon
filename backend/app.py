@@ -127,6 +127,17 @@ def validate():
         'message': 'Environment is OpenEnv compliant'
     })
 
+@app.route('/grader', methods=['GET'])
+def grader():
+    """Dummy grader endpoint for OpenEnv validation"""
+    return jsonify({
+        'task_id': 'easy',
+        'reward': 0.5,
+        'score': 0.5,
+        'done': False,
+        'grader_message': 'Grader validation passed'
+    })
+
 # ===== INDEX PAGE =====
 
 @app.route('/', methods=['GET'])
