@@ -13,27 +13,30 @@ environment:
     grade: /grader
 
 tasks:
-  - id: 1
+  - id: easy
     name: Bug Detection
     difficulty: easy
     description: Detect whether this code has a bug. Use detect_bug if you find one, or skip if code is clean.
-    grader: "backend.environment.tasks:BugDetectionGrader"
+    grader: "grader.civerse_graders:EasyGrader"
+    baseline_score: 0.80
     reward_range: [0.0, 1.0]
     max_steps: 3
 
-  - id: 2
+  - id: medium
     name: Bug Classification
     difficulty: medium
     description: Find ALL bugs and classify their type and severity correctly.
-    grader: "backend.environment.tasks:BugClassificationGrader"
+    grader: "grader.civerse_graders:MediumGrader"
+    baseline_score: 0.50
     reward_range: [0.0, 1.0]
     max_steps: 6
 
-  - id: 3
+  - id: hard
     name: Fix Suggestion
     difficulty: hard
     description: Suggest a detailed fix for the bug with explanation.
-    grader: "backend.environment.tasks:FixSuggestionGrader"
+    grader: "grader.civerse_graders:HardGrader"
+    baseline_score: 0.30
     reward_range: [0.0, 1.0]
     max_steps: 4
 

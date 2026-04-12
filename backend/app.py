@@ -123,7 +123,7 @@ def validate():
     return jsonify({
         'valid': True,
         'tasks': 3,
-        'graders': ['BugDetectionGrader', 'BugClassificationGrader', 'FixSuggestionGrader'],
+        'graders': ['EasyGrader', 'MediumGrader', 'HardGrader'],
         'message': 'Environment is OpenEnv compliant'
     })
 
@@ -156,25 +156,25 @@ def index():
         },
         'tasks': [
             {
-                'id': 1,
+                'id': 'easy',
                 'name': 'Bug Detection',
                 'difficulty': 'easy',
-                'grader': 'BugDetectionGrader',
-                'grader_module': 'backend.environment.tasks'
+                'grader': 'EasyGrader',
+                'grader_module': 'grader.civerse_graders'
             },
             {
-                'id': 2,
+                'id': 'medium',
                 'name': 'Bug Classification',
                 'difficulty': 'medium',
-                'grader': 'BugClassificationGrader',
-                'grader_module': 'backend.environment.tasks'
+                'grader': 'MediumGrader',
+                'grader_module': 'grader.civerse_graders'
             },
             {
-                'id': 3,
+                'id': 'hard',
                 'name': 'Fix Suggestion',
                 'difficulty': 'hard',
-                'grader': 'FixSuggestionGrader',
-                'grader_module': 'backend.environment.tasks'
+                'grader': 'HardGrader',
+                'grader_module': 'grader.civerse_graders'
             }
         ],
     })
