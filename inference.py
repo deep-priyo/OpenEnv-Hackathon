@@ -1,139 +1,137 @@
-import os
-import sys
-from typing import List, Optional
-from dotenv import load_dotenv
-load_dotenv()
+import os, sys, json
+from typing import List, Optional, Dict
 
-# Ensure backend import works
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'backend'))
+try:
+    from dotenv import load_dotenv
 
-from backend.environment import CodeReviewEnvironment
-from backend.agent import CodeReviewAgent
+    load_dotenv()
+except ImportError:
+    pass
 
-# ===== CONFIG =====
-TASK_NAME = os.getenv("MY_ENV_V4_TASK", "code_review")
-BENCHMARK = os.getenv("MY_ENV_V4_BENCHMARK", "my_env_v4")
-MODEL_NAME = os.getenv("MODEL_NAME", "gpt-4o-mini")
 API_BASE_URL = os.getenv("API_BASE_URL", "https://router.huggingface.co/v1")
-HF_TOKEN = os.getenv("HF_TOKEN")
+MODEL_NAME = os.getenv("MODEL_NAME", "Qwen/Qwen2.5-72B-Instruct")
+API_KEY = os.getenv("HF_TOKEN") or os.getenv("API_KEY")
 
-MAX_STEPS = 8
-SUCCESS_THRESHOLD = 0.3
+BENCHMARK = "code-review-env"
+TASK_NAME = "code-review"
+SUCCESS_SCORE_THRESHOLD = 0.50
 
-# Suppress all debug output
-os.environ["EVAL_MODE"] = "true"
+from openai import OpenAI
 
-# Redirect stdout to capture only our logs
-import sys as sys_module
+client = OpenAI(base_url=API_BASE_URL, api_key=API_KEY or "missing")
 
-class OutputFilter:
-    """Filter out debug prints, only allow OpenEnv format"""
-    def __init__(self):
-        self.stdout = sys_module.__stdout__
-        
-    def write(self, text):
-        # Only allow [START], [STEP], [END] lines through
-        if text.startswith(('[START]', '[STEP]', '[END]')):
-            self.stdout.write(text)
-            self.stdout.flush()
-        # Ignore all other prints (like [Agent] debug)
-    
-    def flush(self):
-        self.stdout.flush()
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from models import Action, CodeReviewEnvironment, generate_tasks, ActionPayload
+from grader.code_review_graders import _evaluate_state
 
-# Uncomment to filter debug output (optional)
-# sys_module.stdout = OutputFilter()
 
-# ===== LOGGING FUNCTIONS =====
-def log_start():
-    print(f"[START] task={TASK_NAME} env={BENCHMARK} model={MODEL_NAME}", flush=True)
+def log_start(task, env, model):
+    print(f"[START] task={task} env={env} model={model}", flush=True)
 
-def log_step(step: int, action: str, reward: float, done: bool, error: Optional[str] = None):
-    error_str = error if error else "null"
-    done_str = str(done).lower()
-    print(f"[STEP] step={step} action={action} reward={reward:.2f} done={done_str} error={error_str}", flush=True)
 
-def log_end(success: bool, steps: int, score: float, rewards: List[float]):
-    rewards_str = ",".join(f"{r:.2f}" for r in rewards)
-    print(f"[END] success={str(success).lower()} steps={steps} score={score:.3f} rewards={rewards_str}", flush=True)
+def log_step(step, action, reward, done, error):
+    print(f"[STEP] step={step} action={action} reward={reward:.2f} done={str(done).lower()} error={error or 'null'}",
+          flush=True)
 
-# ===== SILENT AGENT WRAPPER =====
-class SilentAgent:
-    """Wrapper that suppresses agent debug output"""
-    def __init__(self):
-        self.agent = CodeReviewAgent()
-        
-    def act(self, observation):
-        # Suppress prints temporarily
-        original_stdout = sys.stdout
-        sys.stdout = open(os.devnull, 'w')
+
+def log_end(success, steps, score, rewards):
+    print(
+        f"[END] success={str(success).lower()} steps={steps} score={score:.3f} rewards={','.join(f'{r:.2f}' for r in rewards)}",
+        flush=True)
+
+
+def get_llm_action(obs: dict, history: List[str]) -> Optional[Dict]:
+    system = (
+        "You are a code reviewer. Identify bugs and suggest fixes.\n"
+        "Respond with ONLY a JSON object — no markdown, no explanation.\n\n"
+        'FORMAT: {"type": "detect" | "classify" | "fix" | "skip", "payload": {"line_number": int, "bug_type": string, "severity": string, "description": string, "fix": string}}\n'
+    )
+    user = (
+        f"Recent steps:\n{json.dumps(history[-5:])}\n\n"
+        f"Code:\n{obs.get('code', '')}\n\n"
+        "What is your next action JSON? Return a JSON object with 'type' and optionally 'payload'."
+    )
+    try:
+        completion = client.chat.completions.create(
+            model=MODEL_NAME,
+            messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
+            temperature=0.1,
+            max_tokens=150,
+        )
+        text = (completion.choices[0].message.content or "").strip()
+        for fence in ("```json", "```"):
+            if text.startswith(fence): text = text[len(fence):]
+        if text.endswith("```"): text = text[:-3]
+        text = text.strip()
+        s, e = text.find("{"), text.rfind("}")
+        if s != -1 and e != -1:
+            return json.loads(text[s:e + 1])
+    except Exception:
+        pass
+    return None
+
+
+def heuristic_fallback() -> Dict:
+    return {"type": "skip"}
+
+
+def run_task(level: str) -> float:
+    max_steps = 15
+    log_start(task=TASK_NAME, env=BENCHMARK, model=MODEL_NAME)
+    tasks = generate_tasks(level)
+    env = CodeReviewEnvironment(tasks=tasks, max_steps=max_steps)
+    obs = env.reset()
+    done, step, rewards, history, info = False, 0, [], [], {}
+
+    while not done and step < max_steps:
+        step += 1
+        obs_dict = {"code": obs.code, "task_id": obs.task_id, "step": obs.step}
+        action_dict, error_msg = None, None
         try:
-            action = self.agent.act(observation)
-        finally:
-            sys.stdout.close()
-            sys.stdout = original_stdout
-        return action
+            action_dict = get_llm_action(obs_dict, history)
+        except Exception as ex:
+            error_msg = str(ex)[:80]
 
-# ===== MAIN =====
-def main():
-    success = False
-    final_score = 0.0
-    rewards = []
-    steps_taken = 0
+        if not action_dict:
+            action_dict = heuristic_fallback()
 
-    # Disable agent debug prints
-    original_stdout = sys.stdout
-    sys.stdout = open(os.devnull, 'w')
-    try:
-        env = CodeReviewEnvironment(use_dynamic_snippets=False)
-        agent = CodeReviewAgent()
-    finally:
-        sys.stdout.close()
-        sys.stdout = original_stdout
+        action_str = json.dumps(action_dict, separators=(",", ":"))
 
-    log_start()
-
-    try:
-        obs = env.reset()
-        done = False
-
-        for step in range(1, MAX_STEPS + 1):
-            if done:
-                break
-
-            # Suppress agent prints during action
-            sys.stdout = open(os.devnull, 'w')
-            try:
-                action = agent.act(obs)
-            finally:
-                sys.stdout.close()
-                sys.stdout = original_stdout
-
+        try:
+            payload_dict = action_dict.get("payload", {})
+            payload_obj = ActionPayload(**payload_dict) if payload_dict else None
+            action = Action(type=action_dict.get("type", "skip"), payload=payload_obj)
             obs, reward, done, info = env.step(action)
+            reward = float(reward)
+        except Exception as ex:
+            reward, done, error_msg = -0.1, True, error_msg or str(ex)[:80]
 
-            r = reward.score if reward else 0.0
-            rewards.append(r)
-            steps_taken = step
+        rewards.append(reward)
+        history.append(f"Step {step}: {action_str} -> reward={reward:.2f}")
+        log_step(step=step, action=action_str, reward=reward, done=done, error=error_msg)
 
-            action_str = str(action.action_type)
+    score = float(info.get("final_score", 0.0))
+    if score == 0.0:
+        score = _evaluate_state(env.state.model_dump())
+    score = max(0.01, min(0.99, score))
+    success = score >= SUCCESS_SCORE_THRESHOLD
+    log_end(success, step, score, rewards)
+    return score
 
-            log_step(step, action_str, r, done)
 
-        # Normalize score
-        final_score = sum(rewards) / len(rewards) if rewards else 0.0
-        final_score = max(0.01, min(0.99, final_score))
-        success = final_score >= SUCCESS_THRESHOLD
-
-    except Exception as e:
-        log_end(False, steps_taken, 0.0, rewards)
-        raise e
-
-    finally:
+def main():
+    levels = ["easy", "medium", "hard", "expert"]
+    all_scores = {}
+    for level in levels:
         try:
-            env.close()
-        except:
-            pass
-        log_end(success, steps_taken, final_score, rewards)
+            all_scores[level] = run_task(level)
+        except Exception as ex:
+            print(f"[ERROR] task={level} error={str(ex)[:80]}", flush=True)
+            all_scores[level] = 0.01
+
+    avg = max(0.01, min(0.99, sum(all_scores.values()) / len(all_scores)))
+    print(f"[SUMMARY] scores={json.dumps(all_scores)} average={avg:.3f}", flush=True)
+
 
 if __name__ == "__main__":
     main()
