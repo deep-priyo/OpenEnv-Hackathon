@@ -1,265 +1,208 @@
 ---
-title: OpenEnv Code Review Environment
-emoji: 🤖
-colorFrom: blue
-colorTo: purple
+
+title: CIVERSE
+emoji: 💻
+colorFrom: purple
+colorTo: blue
 sdk: docker
-app_port: 7860
-app_file: backend/app.py
+app_file: server/app.py
 pinned: false
+tags: [openenv, rl, code-review, bug-detection, agent-eval]
+-----------------------------------------------------------
+
+# 💻 CIVERSE — Code Review RL Environment
+
+### 🚀 Evaluating AI Agents on Real-World Code Review Tasks
+
+[![OpenEnv](https://img.shields.io/badge/Powered_by-OpenEnv-brightgreen?style=for-the-badge)](#)
+[![Python 3.11](https://img.shields.io/badge/Python-3.11-blue?style=for-the-badge\&logo=python)](#)
+
 ---
 
+## 🧠 Overview
 
+**CIVERSE** is an OpenEnv-compatible reinforcement learning environment designed to evaluate how effectively AI agents perform **code review tasks**.
 
-# CIVERSE(OPNE-ENV): Code Review RL Environment (OpenEnv-Compatible)
-
-An **OpenEnv-compatible reinforcement learning environment** for evaluating AI agents on real-world code review tasks.
-
-This project simulates a structured evaluation system where an AI agent must:
+Instead of generating code, agents must:
 
 * 🐞 Detect bugs
-* 🏷️ Classify bugs
+* 🏷️ Classify issues
 * 🛠️ Suggest fixes
 
----
-
-## 🧠 Project Overview
-
-Unlike traditional code analysis tools, this system does **not detect bugs itself**.
-
-Instead, it provides:
-
-> ✅ A **benchmarking environment** that evaluates an agent’s ability to perform code review tasks.
-
-Each code snippet comes with **ground-truth annotations**, and the agent is scored using **programmatic graders**.
+This transforms code review into a **structured RL problem**, enabling benchmarking of reasoning, precision, and correctness.
 
 ---
 
-## 🎯 Tasks
+## ⚡ Core Idea
 
-The environment consists of **3 progressive tasks**:
+> This is NOT a bug detector.
+> It is a **benchmark for evaluating AI code reviewers**.
 
-### 1. 🟢 Bug Detection (Easy)
-
-* Determine whether code contains a bug
-* Output: detect_bug or skip
-
-### 2. 🟡 Bug Classification (Medium)
-
-* Identify ALL bugs
-* Classify:
-
-  * Bug type (security, logic, etc.)
-  * Severity (critical, high, medium, low)
-
-### 3. 🔴 Fix Suggestion (Hard)
-
-* Provide:
-
-  * Correct fix
-  * Explanation
-* Evaluated using heuristic scoring
+Each episode presents a code snippet with hidden ground-truth bugs.
+The agent interacts step-by-step and is scored based on accuracy and reasoning.
 
 ---
 
-## ⚙️ Architecture
+## 🎮 Action Space
 
-```
-project/
-│
-├── environment.py        # RL environment (reset, step, state)
-├── models.py            # Pydantic models (Action, Observation, Reward)
-├── tasks.py             # Graders (evaluation logic)
-├── snippet_generator.py # Dynamic code generation (OpenAI)
-│
-├── agent.py             # LLM-based agent (OpenAI)
-├── baseline_inference.py# Full episode runner
-│
-├── api_routes.py        # Flask API endpoints
-├── app.py               # Flask app entry point
+Although internally abstracted, actions map directly to code review tasks:
+
+| Action   | Interpretation        |
+| -------- | --------------------- |
+| `work`   | Detect a bug          |
+| `focus`  | Classify the bug      |
+| `switch` | Move to another issue |
+| `break`  | No operation          |
+| `delay`  | Skip step             |
+
+### Example Action
+
+```json
+{"type": "work", "task_id": "m1"}
 ```
 
 ---
 
-## 🔁 RL Interaction Loop
+## 👁️ Observation Space
+
+```json
+{
+  "code": "def add(a, b):\n    return a - b",
+  "task_id": "e1",
+  "step": 1
+}
+```
+
+### What the agent sees:
+
+* **code** → snippet to analyze
+* **task_id** → scenario identifier
+* **step** → current timestep
+
+---
+
+## 🧪 Task Levels
+
+| Level     | Focus                              | Complexity              |
+| --------- | ---------------------------------- | ----------------------- |
+| 🟢 Easy   | Single bug detection               | Basic logic             |
+| 🟡 Medium | Multiple bugs + classification     | Edge cases              |
+| 🔴 Hard   | Detection + classification + fixes | Security + logic        |
+| ⚫ Expert  | Multi-step reasoning               | Complex vulnerabilities |
+
+---
+
+## 🏆 Scoring System
+
+```text
+score = detection_accuracy × 0.33
+      + classification_accuracy × 0.33
+      + fix_quality × 0.34
+```
+
+### Metrics:
+
+* **Detection Accuracy** → Did the agent find real bugs?
+* **Classification Accuracy** → Did it label them correctly?
+* **Fix Quality** → Are the fixes valid and meaningful?
+
+---
+
+## ⚙️ How It Works
 
 ```
 reset() → Observation → Agent → Action → step() → Reward → repeat
 ```
 
----
-
-## 📊 Evaluation System
-
-### ✔ Task 1 & 2:
-
-* Exact matching
-* Precision / Recall / F1 scoring
-
-### ✔ Task 3:
-
-* Heuristic scoring:
-
-  * Keyword overlap
-  * Explanation quality
-  * Code presence
+* Environment provides code
+* Agent responds with structured action
+* System evaluates correctness
+* Score is computed at episode end
 
 ---
 
-## 🔍 Ground Truth
+## 🏗️ Project Structure
 
-### Static Mode (No API Key)
-
-* Uses **hardcoded code snippets**
-* Each snippet contains predefined `known_bugs`
-
-### Dynamic Mode (With OpenAI Key)
-
-* Code + bugs are generated together using LLM
-* Ground truth is **structured and validated**
+```
+code-review-env/
+├── models.py              # Core environment logic
+├── inference.py           # LLM-based agent
+├── openenv.yaml           # OpenEnv specification
+├── Dockerfile             # Deployment config
+├── backend/
+│   └── main.py            # FastAPI server
+├── server/
+│   └── app.py             # Uvicorn entrypoint
+├── grader/
+│   └── code_review_graders.py
+```
 
 ---
 
-## 🚀 Getting Started
+## 🚀 Running the Project
 
-### 1. Install dependencies
+### 1️⃣ Install dependencies
 
 ```bash
-pip install flask flask-cors pydantic openai
+pip install -r requirements.txt
 ```
 
 ---
 
-### 2. Run the server
+### 2️⃣ Start server
 
 ```bash
-python app.py
-```
-
-Server runs at:
-
-```
-http://localhost:7860
+uvicorn server.app:app --port 7860 --reload
 ```
 
 ---
 
-## 🧪 API Testing (Postman)
-
-### Reset environment
-
-```
-POST /api/reset
-```
-
----
-
-### Step (send action)
-
-```
-POST /api/step
-```
-
-Example:
-
-```json
-{
-  "action_type": "detect_bug",
-  "bug": {
-    "line_number": 2,
-    "bug_type": "security",
-    "severity": "critical",
-    "description": "SQL injection",
-    "suggested_fix": "Use parameterized queries"
-  },
-  "confidence": 0.9
-}
-```
-
----
-
-### Get state
-
-```
-GET /api/state
-```
-
----
-
-## 🤖 Running with Agent (Full Automation)
-
-### Requires OpenAI API Key
+### 3️⃣ Run agent
 
 ```bash
-export OPENAI_API_KEY="your_key"
-python baseline_inference.py
+export HF_TOKEN="your_token"
+export API_BASE_URL="https://router.huggingface.co/v1"
+export MODEL_NAME="Qwen/Qwen2.5-72B-Instruct"
+
+python inference.py
 ```
 
 ---
 
-### Output Example
+## 📊 Reward Design
 
-```
-Task 1 → Score: 1.0
-Task 2 → Score: 0.76
-Task 3 → Score: 0.65
-
-Final Score: 0.79
-```
-
----
-
-## 🧠 Key Features
-
-* ✅ OpenEnv-compatible (reset, step, state)
-* ✅ Multi-step reasoning evaluation
-* ✅ Structured action space
-* ✅ Reward shaping (penalty + confidence bonus)
-* ✅ Dynamic code generation
-* ✅ Stateless + API-driven design
+| Event                  | Reward |
+| ---------------------- | ------ |
+| Correct detection      | +0.30  |
+| Correct classification | +0.30  |
+| Correct fix            | +0.40  |
+| Incorrect action       | −0.10  |
+| Skip                   | 0.00   |
 
 ---
 
-## ⚠️ Limitations
+## 🔧 Environment Variables
 
-* Fix evaluation uses keyword matching (not semantic)
-* Line-number-based matching can be brittle
-* LLM-generated ground truth may not always be perfect
-
----
-
-## 🚀 Future Improvements
-
-* 🔥 Embedding-based semantic scoring (OpenAI / Ollama)
-* 🔥 Multi-agent evaluation
-* 🔥 Dataset persistence & benchmarking leaderboard
-* 🔥 Visualization dashboard for agent performance
+| Variable       | Description      |
+| -------------- | ---------------- |
+| `API_BASE_URL` | LLM endpoint     |
+| `MODEL_NAME`   | Model identifier |
+| `HF_TOKEN`     | API key          |
 
 ---
 
-## 💡 Key Insight
+## 💡 Why This Matters
 
-> This project is not a bug detector — it is a **benchmark for evaluating AI code review agents**.
+CIVERSE enables:
 
----
-
-## 🏁 Hackathon Value
-
-This system demonstrates:
-
-* RL-style environment design
-* LLM integration
-* Structured evaluation
-* Real-world applicability in code review automation
+* 🧠 Evaluation of reasoning-heavy AI tasks
+* 🔍 Benchmarking LLM code understanding
+* ⚙️ Testing multi-step decision making
 
 ---
 
-## 👨‍💻 Author
+## 🏁 Final Note
 
-Built as part of a hackathon project focused on **AI evaluation systems and reinforcement learning environments**.
+This project demonstrates how **real-world developer workflows** can be converted into **reinforcement learning environments** — opening new directions for evaluating intelligent systems.
 
 ---
-
-## ⭐ If you like this project
-
-Give it a star and share feedback!
