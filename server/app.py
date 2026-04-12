@@ -1,17 +1,15 @@
-import os
+import uvicorn
 import sys
+import os
 
-# Add backend to path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'backend'))
-from dotenv import load_dotenv
-load_dotenv()
-from backend.app import app
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from backend.main import app  # app is now importable as server.app:app
 
 
 def main():
-    port = int(os.getenv("PORT", 7860))
-    app.run(host="0.0.0.0", port=port, debug=False)
+    uvicorn.run(app, host="0.0.0.0", port=7860)
 
 
 if __name__ == "__main__":
-    main()                                          
+    main()
